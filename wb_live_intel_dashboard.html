@@ -1,0 +1,1434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WB Election Intel Dashboard — Bankura 2026</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root{
+  --bg:#f1f5f9;--bg2:#ffffff;--bg3:#f8fafc;--bg4:#e8eef6;
+  --border:#e2e8f0;--border2:#cbd5e1;
+  --accent:#2563eb;--accent2:#1d4ed8;--accent3:#3b82f6;
+  --green:#16a34a;--green2:#15803d;
+  --amber:#d97706;--amber2:#b45309;
+  --red:#dc2626;--red2:#b91c1c;
+  --purple:#7c3aed;--teal:#0891b2;
+  --text:#0f172a;--text2:#334155;--text3:#64748b;
+  --card-bg:#ffffff;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;font-size:14px;line-height:1.6;min-height:100vh}
+
+/* HEADER */
+.topbar{background:linear-gradient(135deg,#1e40af 0%,#2563eb 100%);border-bottom:1px solid #1d4ed8;padding:0 20px;height:52px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:200;box-shadow:0 2px 8px rgba(37,99,235,0.25)}
+.logo{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:500;color:#93c5fd;letter-spacing:0.05em}
+.sep{width:1px;height:24px;background:rgba(255,255,255,0.25)}
+.hdr-district{font-size:13px;font-weight:600;color:#ffffff}
+.hdr-sub{font-size:11px;color:#bfdbfe;font-family:'JetBrains Mono',monospace}
+.hdr-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+.pulse-dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.status-label{font-size:11px;font-family:'JetBrains Mono',monospace;color:#86efac}
+.clock-display{font-family:'JetBrains Mono',monospace;font-size:12px;color:#bfdbfe}
+.next-refresh{font-family:'JetBrains Mono',monospace;font-size:11px;color:#fde68a;background:rgba(255,255,255,0.12);padding:3px 10px;border-radius:20px;border:1px solid rgba(255,255,255,0.25)}
+.mode-badge{font-size:11px;font-family:'JetBrains Mono',monospace;padding:3px 10px;border-radius:20px;cursor:pointer;border:1px solid}
+.mode-normal{background:rgba(255,255,255,0.15);color:#ffffff;border-color:rgba(255,255,255,0.35)}
+.mode-election{background:rgba(239,68,68,0.3);color:#fca5a5;border-color:rgba(239,68,68,0.6);animation:urgentPulse 3s infinite}
+@keyframes urgentPulse{0%,100%{opacity:1}50%{opacity:.7}}
+
+/* LAYOUT */
+.main{display:grid;grid-template-columns:280px 1fr;gap:0;min-height:calc(100vh - 52px)}
+
+/* LEFT SIDEBAR */
+.sidebar{background:var(--bg2);border-right:1px solid var(--border);padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:14px}
+.sidebar-section{display:flex;flex-direction:column;gap:8px}
+.sid-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);font-family:'JetBrains Mono',monospace;padding:0 2px}
+.ctrl-btn{width:100%;padding:9px 12px;border-radius:8px;border:1px solid var(--border2);background:transparent;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;cursor:pointer;text-align:left;transition:all .15s;display:flex;align-items:center;gap:8px}
+.ctrl-btn:hover{background:var(--bg4);border-color:var(--accent)}
+.ctrl-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500;justify-content:center}
+.ctrl-btn.primary:hover{opacity:.85}
+.ctrl-btn.danger{background:rgba(239,68,68,0.1);border-color:rgba(239,68,68,0.4);color:var(--red2)}
+.ctrl-btn.danger:hover{background:rgba(239,68,68,0.2)}
+.ctrl-btn .btn-icon{font-size:14px;width:18px}
+.stat-mini{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 12px}
+.stat-mini-val{font-size:22px;font-weight:600;font-family:'JetBrains Mono',monospace}
+.stat-mini-lbl{font-size:11px;color:var(--text2);margin-top:2px}
+.query-topics{display:flex;flex-direction:column;gap:4px}
+.topic-chip{padding:6px 10px;border-radius:6px;border:1px solid var(--border);font-size:12px;color:var(--text2);cursor:pointer;transition:all .12s;display:flex;align-items:center;justify-content:space-between}
+.topic-chip:hover{border-color:var(--accent);color:var(--accent2)}
+.topic-chip.active{background:rgba(59,130,246,0.12);border-color:var(--accent);color:var(--accent2)}
+.topic-chip .chip-count{font-family:'JetBrains Mono',monospace;font-size:10px;background:var(--bg4);padding:2px 6px;border-radius:10px}
+
+/* MAIN CONTENT */
+.content{overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:16px}
+
+/* ALERT BANNER */
+.alert-banner{display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:10px 16px;font-size:13px;color:var(--red2);align-items:center;gap:10px}
+.alert-banner.show{display:flex}
+.alert-icon{font-size:16px}
+
+/* METRICS ROW */
+.metrics-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.metric-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px}
+.metric-val{font-size:24px;font-weight:600;font-family:'JetBrains Mono',monospace;line-height:1}
+.metric-lbl{font-size:11px;color:var(--text2);margin-top:4px}
+.metric-trend{font-size:11px;margin-top:4px;font-family:'JetBrains Mono',monospace}
+.trend-up{color:var(--red2)}
+.trend-dn{color:var(--green2)}
+.trend-flat{color:var(--text3)}
+
+/* FEED PANELS */
+.feeds-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.feed-panel{background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+.feed-panel.full-width{grid-column:1/-1}
+.feed-header{padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;background:var(--bg3)}
+.feed-icon{font-size:14px;width:20px;text-align:center}
+.feed-title{font-size:13px;font-weight:600;color:var(--text);flex:1}
+.feed-badge{font-size:10px;font-family:'JetBrains Mono',monospace;padding:2px 8px;border-radius:10px}
+.fb-local{background:rgba(59,130,246,0.15);color:var(--accent2)}
+.fb-wb{background:rgba(16,185,129,0.15);color:var(--green2)}
+.fb-nat{background:rgba(139,92,246,0.15);color:var(--purple)}
+.fb-alert{background:rgba(239,68,68,0.15);color:var(--red2)}
+.feed-body{padding:10px 0;flex:1;min-height:120px}
+.feed-loading{padding:20px;text-align:center;color:var(--text3);font-size:12px;font-family:'JetBrains Mono',monospace}
+.feed-item{padding:10px 14px;border-bottom:1px solid var(--border);font-size:12px}
+.feed-item:last-child{border-bottom:none}
+.fi-source{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3);margin-bottom:3px;display:flex;align-items:center;gap:6px}
+.fi-source-name{color:var(--accent2)}
+.fi-severity{font-size:9px;padding:1px 6px;border-radius:8px;font-family:'JetBrains Mono',monospace}
+.sev-high{background:rgba(239,68,68,0.2);color:var(--red2)}
+.sev-med{background:rgba(245,158,11,0.2);color:var(--amber2)}
+.sev-low{background:rgba(16,185,129,0.2);color:var(--green2)}
+.fi-text{color:var(--text);line-height:1.5;margin-bottom:4px}
+.fi-time{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3)}
+
+/* ANALYSIS PANEL */
+.analysis-panel{background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.analysis-header{padding:10px 14px;border-bottom:1px solid var(--border);background:var(--bg3);display:flex;align-items:center;gap:8px}
+.analysis-body{padding:14px;font-size:13px;color:var(--text);line-height:1.7;min-height:80px}
+.analysis-body .section{margin-bottom:12px}
+.analysis-body .sec-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);font-family:'JetBrains Mono',monospace;margin-bottom:4px}
+.analysis-body p{color:var(--text2);font-size:13px}
+.analysis-body .highlight{color:var(--amber2);font-weight:500}
+.analysis-body .safe{color:var(--green2);font-weight:500}
+.analysis-body .risk{color:var(--red2);font-weight:500}
+.analysis-footer{padding:8px 14px;border-top:1px solid var(--border);font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3);display:flex;justify-content:space-between}
+
+/* PROGRESS BAR */
+.refresh-progress{height:2px;background:var(--border);position:relative;overflow:hidden}
+.refresh-bar{height:100%;background:var(--accent);transition:width 1s linear}
+
+/* SCROLLBAR */
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:#f1f5f9}
+::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:2px}
+
+
+/* TIMELINE / MEMORY */
+.tl-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:500;display:flex;align-items:center;justify-content:center}
+.tl-modal{background:var(--bg2);border:1px solid var(--border2);border-radius:14px;width:min(92vw,860px);max-height:88vh;display:flex;flex-direction:column;overflow:hidden}
+.tl-modal-header{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;background:var(--bg3);flex-shrink:0}
+.tl-modal-title{font-size:14px;font-weight:600;flex:1}
+.tl-modal-body{flex:1;overflow-y:auto;padding:20px}
+.tl-modal-footer{padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:10px;flex-wrap:wrap;background:var(--bg3);flex-shrink:0}
+.tl-btn{padding:8px 16px;border-radius:7px;border:1px solid var(--border2);background:transparent;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12px;cursor:pointer;transition:all .15s}
+.tl-btn:hover{background:var(--bg4);border-color:var(--accent)}
+.tl-btn.tl-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.tl-btn.tl-danger{background:rgba(239,68,68,0.1);border-color:rgba(239,68,68,0.4);color:var(--red2)}
+.tl-entry{border-left:2px solid var(--border2);margin-left:12px;padding:0 0 24px 20px;position:relative}
+.tl-entry:last-child{padding-bottom:0;border-color:transparent}
+.tl-dot{width:12px;height:12px;border-radius:50%;position:absolute;left:-7px;top:2px;border:2px solid var(--bg2)}
+.tl-dot-critical{background:var(--red2)}
+.tl-dot-high{background:var(--amber2)}
+.tl-dot-moderate{background:var(--amber)}
+.tl-dot-low{background:var(--green2)}
+.tl-ts{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3);margin-bottom:4px}
+.tl-headline{font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
+.tl-meta{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.tl-tag{font-size:10px;padding:2px 8px;border-radius:10px;font-family:'JetBrains Mono',monospace}
+.tl-tag-threat-LOW{background:rgba(16,185,129,0.15);color:var(--green2)}
+.tl-tag-threat-MODERATE{background:rgba(245,158,11,0.15);color:var(--amber2)}
+.tl-tag-threat-HIGH{background:rgba(239,68,68,0.15);color:var(--red2)}
+.tl-tag-threat-CRITICAL{background:rgba(239,68,68,0.3);color:var(--red2)}
+.tl-tag-stat{background:var(--bg4);color:var(--text2)}
+.tl-feeds{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.tl-feed-block{background:var(--bg3);border-radius:6px;padding:8px 10px}
+.tl-feed-title{font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3);text-transform:uppercase;margin-bottom:4px}
+.tl-feed-item{font-size:11px;color:var(--text2);padding:3px 0;border-bottom:1px solid var(--border);line-height:1.4}
+.tl-feed-item:last-child{border-bottom:none}
+.tl-analysis-block{background:var(--bg3);border-radius:6px;padding:10px 12px;margin-top:8px;font-size:12px;color:var(--text2);line-height:1.6}
+.tl-analysis-block .risk{color:var(--red2)}
+.tl-analysis-block .safe{color:var(--green2)}
+.tl-empty{padding:40px;text-align:center;color:var(--text3);font-size:13px}
+/* VIDEO CANVAS OVERLAY */
+#videoCanvas{display:none;position:fixed;inset:0;z-index:900;background:#0b0f1a}
+#videoControls{position:fixed;top:16px;right:16px;z-index:950;display:none;background:var(--bg2);border:1px solid var(--border2);border-radius:10px;padding:12px;display:none;flex-direction:column;gap:8px;min-width:220px}
+
+/* SPINNER */
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.empty-state{padding:32px;text-align:center;color:var(--text3);font-size:13px}
+.empty-icon{font-size:28px;margin-bottom:8px;display:block}
+
+/* ── CHARTS ROW ── */
+.charts-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.chart-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
+.map-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
+.chart-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);font-family:'JetBrains Mono',monospace;margin-bottom:10px}
+.chart-wrap{position:relative;height:130px}
+
+/* ── DISTRICT MAP ── */
+.district-map{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:6px}
+.dist-pill{background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 8px;text-align:center}
+.dist-pill.your{border-color:var(--accent);background:rgba(59,130,246,0.08)}
+.dist-name{font-size:11px;font-weight:600;color:var(--text);margin-bottom:2px}
+.dist-badge{font-size:9px;font-family:'JetBrains Mono',monospace;font-weight:600;padding:1px 6px;border-radius:8px;display:inline-block}
+.threat-LOW .dist-badge{background:rgba(16,185,129,0.15);color:var(--green2)}
+.threat-MODERATE .dist-badge{background:rgba(245,158,11,0.15);color:var(--amber2)}
+.threat-HIGH .dist-badge, .threat-CRITICAL .dist-badge{background:rgba(239,68,68,0.15);color:var(--red2)}
+
+/* ── IMAGE / TICKER ROW ── */
+.img-ticker-wrap{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 14px;overflow:hidden}
+.ticker-header{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.ticker-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);font-family:'JetBrains Mono',monospace}
+.ticker-live{font-size:9px;background:rgba(239,68,68,0.15);color:var(--red2);padding:2px 7px;border-radius:8px;font-family:'JetBrains Mono',monospace;font-weight:600;animation:blink 2s infinite}
+.img-ticker{display:flex;gap:10px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+.img-ticker::-webkit-scrollbar{display:none}
+.img-card{flex-shrink:0;width:180px;border-radius:8px;overflow:hidden;border:1px solid var(--border);cursor:pointer;transition:opacity .15s}
+.img-card:hover{opacity:.85}
+.img-card img{width:100%;height:100px;object-fit:cover;display:block}
+.img-card-caption{padding:5px 8px;font-size:10px;color:var(--text2);font-weight:500}
+.images-row{display:none}
+/* ANI ticker */
+.ticker-wrap{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px;overflow:hidden}
+.ticker-track{overflow:hidden;flex:1;height:22px;display:flex;align-items:center}
+.ticker-inner{display:flex;gap:40px;animation:scroll 60s linear infinite;white-space:nowrap;font-size:12px;color:var(--text2)}
+@keyframes scroll{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+
+/* ── FIGURE MONITOR ── */
+.figure-monitor{background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.figure-monitor-header{padding:10px 14px;border-bottom:1px solid var(--border);background:var(--bg3);display:flex;align-items:center;gap:8px}
+.figure-monitor-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;padding:12px}
+.fig-card{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 12px;border-left:3px solid var(--border2);transition:box-shadow .15s}
+.fig-card:hover{box-shadow:0 2px 8px rgba(0,0,0,0.08)}
+.fig-card.party-tmc{border-left-color:#10b981}
+.fig-card.party-bjp{border-left-color:#f97316}
+.fig-card.party-cpim{border-left-color:#ef4444}
+.fig-name{font-size:12px;font-weight:600;color:var(--text);margin-bottom:2px;display:flex;align-items:center;gap:6px}
+.fig-party{font-size:9px;font-family:'JetBrains Mono',monospace;font-weight:700;padding:1px 6px;border-radius:8px}
+.fig-party-tmc{background:#dcfce7;color:#15803d}
+.fig-party-bjp{background:#fff7ed;color:#c2410c}
+.fig-party-cpim{background:#fee2e2;color:#b91c1c}
+.fig-role{font-size:11px;color:var(--text3);margin-bottom:6px}
+.fig-links{display:flex;gap:6px;margin-bottom:6px}
+.fig-link{font-size:10px;font-family:'JetBrains Mono',monospace;padding:2px 8px;border-radius:10px;border:1px solid var(--border2);color:var(--accent);text-decoration:none;background:var(--bg4)}
+.fig-link:hover{background:var(--accent);color:#fff}
+.fig-mentions{margin-top:4px}
+.fig-mention-count{font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3);margin-bottom:4px}
+.fig-mention-count.has-mentions{color:var(--accent);font-weight:600}
+.fig-headline{font-size:11px;color:var(--text2);padding:5px 8px;background:var(--bg2);border-radius:5px;border-left:2px solid var(--accent);margin-bottom:3px;line-height:1.4}
+.fig-headline a{color:inherit;text-decoration:none}
+.fig-headline a:hover{color:var(--accent)}
+.fig-headline .sev-badge{font-size:9px;font-family:'JetBrains Mono',monospace;padding:1px 5px;border-radius:6px;margin-right:4px}
+.fig-no-mention{font-size:11px;color:var(--text3);font-style:italic;padding:2px 0}
+
+/* ── PARTIES FEED BADGE ── */
+.fb-parties{background:rgba(139,92,246,0.15);color:var(--purple)}
+
+/* ── BANGLA FEED BADGE ── */
+.fb-bangla{background:rgba(251,191,36,0.15);color:#92400e}
+
+/* ── TOPIC CHIP DROPDOWN ── */
+.chip-wrap{display:flex;flex-direction:column}
+.chip-dropdown{display:none;margin-top:3px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px 6px;font-size:11px;max-height:160px;overflow-y:auto}
+.chip-dropdown.open{display:block}
+.chip-drop-item{padding:3px 2px;border-bottom:1px solid var(--border);line-height:1.4;color:var(--text2);display:flex;gap:4px;align-items:flex-start}
+.chip-drop-item:last-child{border-bottom:none}
+.chip-drop-item a{color:var(--accent);text-decoration:none;font-size:9px;flex-shrink:0;padding-top:2px}
+.chip-drop-item a:hover{text-decoration:underline}
+.chip-drop-empty{padding:4px 2px;color:var(--text3);font-style:italic}
+
+/* ── FI FOOTER (link row in feed items) ── */
+.fi-footer{display:flex;align-items:center;justify-content:space-between;margin-top:3px}
+.fi-link{font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--accent2);text-decoration:none;padding:1px 6px;border-radius:4px;border:1px solid rgba(59,130,246,0.3);transition:all .12s}
+.fi-link:hover{background:rgba(59,130,246,0.1)}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">[ OSINT ]</div>
+  <div class="sep"></div>
+  <div>
+    <div class="hdr-district">WB Election Intel · Bankura</div>
+    <div class="hdr-sub">Phase 1 · 23 April 2026</div>
+  </div>
+  <div class="hdr-right">
+    <div class="pulse-dot" id="liveDot"></div>
+    <span class="status-label" id="statusLabel">STANDBY</span>
+    <div class="sep"></div>
+    <div class="next-refresh" id="nextRefreshDisplay">Next: --:--</div>
+    <div class="mode-badge mode-normal" id="modeBadge" onclick="toggleMode()">NORMAL MODE</div>
+    <div class="clock-display" id="clock"></div>
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+
+    <div class="sidebar-section">
+      <div class="sid-label">Controls</div>
+      <button class="ctrl-btn primary" onclick="runFetch(true)">
+        <span class="btn-icon">↻</span> Fetch &amp; Analyse Now
+      </button>
+      <button class="ctrl-btn danger" onclick="toggleMode()" id="modeToggleBtn">
+        <span class="btn-icon">🚨</span> Switch to Election Day Mode
+      </button>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sid-label">Refresh interval</div>
+      <div class="stat-mini">
+        <div class="stat-mini-val" id="intervalDisplay" style="color:var(--accent2)">30 min</div>
+        <div class="stat-mini-lbl">Auto-refresh (normal mode)</div>
+      </div>
+      <div class="stat-mini">
+        <div class="stat-mini-val" id="cycleCount" style="color:var(--green2)">0</div>
+        <div class="stat-mini-lbl">Analysis cycles run</div>
+      </div>
+      <div class="stat-mini">
+        <div class="stat-mini-val" id="alertCount" style="color:var(--red2)">0</div>
+        <div class="stat-mini-lbl">High-priority alerts</div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sid-label">Monitor topics</div>
+      <div class="query-topics" id="topicList">
+        <div class="chip-wrap">
+          <div class="topic-chip active" onclick="toggleChip(0)">
+            <span>Bankura violence</span><span class="chip-count" id="cnt-0">—</span>
+          </div>
+          <div class="chip-dropdown" id="chip-drop-0"></div>
+        </div>
+        <div class="chip-wrap">
+          <div class="topic-chip active" onclick="toggleChip(1)">
+            <span>Bankura / Bishnupur</span><span class="chip-count" id="cnt-1">—</span>
+          </div>
+          <div class="chip-dropdown" id="chip-drop-1"></div>
+        </div>
+        <div class="chip-wrap">
+          <div class="topic-chip active" onclick="toggleChip(2)">
+            <span>Purulia / Jhargram</span><span class="chip-count" id="cnt-2">—</span>
+          </div>
+          <div class="chip-dropdown" id="chip-drop-2"></div>
+        </div>
+        <div class="chip-wrap">
+          <div class="topic-chip active" onclick="toggleChip(3)">
+            <span>Birbhum / Bardhaman</span><span class="chip-count" id="cnt-3">—</span>
+          </div>
+          <div class="chip-dropdown" id="chip-drop-3"></div>
+        </div>
+        <div class="chip-wrap">
+          <div class="topic-chip active" onclick="toggleChip(4)">
+            <span>MCC violations WB</span><span class="chip-count" id="cnt-4">—</span>
+          </div>
+          <div class="chip-dropdown" id="chip-drop-4"></div>
+        </div>
+        <div class="chip-wrap">
+          <div class="topic-chip active" onclick="toggleChip(5)">
+            <span>TMC vs BJP clashes</span><span class="chip-count" id="cnt-5">—</span>
+          </div>
+          <div class="chip-dropdown" id="chip-drop-5"></div>
+        </div>
+        <div class="chip-wrap">
+          <div class="topic-chip active" onclick="toggleChip(6)">
+            <span>EVM / VVPAT issues</span><span class="chip-count" id="cnt-6">—</span>
+          </div>
+          <div class="chip-dropdown" id="chip-drop-6"></div>
+        </div>
+        <div class="chip-wrap">
+          <div class="topic-chip active" onclick="toggleChip(7)">
+            <span>Paramilitary / security</span><span class="chip-count" id="cnt-7">—</span>
+          </div>
+          <div class="chip-dropdown" id="chip-drop-7"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sid-label">Memory &amp; timeline</div>
+      <button class="ctrl-btn" onclick="openTimeline()">
+        <span class="btn-icon">📜</span> View election timeline
+      </button>
+      <button class="ctrl-btn" onclick="openVideoExport()">
+        <span class="btn-icon">🎬</span> Export as video
+      </button>
+      <div class="stat-mini">
+        <div class="stat-mini-val" id="memCount" style="color:var(--purple)">0</div>
+        <div class="stat-mini-lbl">Cycles stored in memory</div>
+      </div>
+      <button class="ctrl-btn tl-danger" style="font-size:11px;padding:6px 10px" onclick="clearMemory()">
+        <span class="btn-icon">🗑</span> Clear stored memory
+      </button>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sid-label">Last run</div>
+      <div class="stat-mini">
+        <div class="stat-mini-val" style="font-size:13px;color:var(--text2)" id="lastRunTime">Never</div>
+        <div class="stat-mini-lbl">Last successful fetch</div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div id="connMode" style="font-size:10px;padding:5px 8px;border-radius:6px;font-family:'JetBrains Mono',monospace"></div>
+    </div>
+
+  </div>
+
+  <!-- MAIN CONTENT -->
+  <div class="content" id="mainContent">
+
+    <div class="alert-banner" id="alertBanner">
+      <span class="alert-icon">⚠</span>
+      <span id="alertBannerText"></span>
+    </div>
+
+    <!-- METRICS -->
+    <div class="metrics-row">
+      <div class="metric-card">
+        <div class="metric-val" id="mTotalSignals" style="color:var(--accent2)">—</div>
+        <div class="metric-lbl">Total signals monitored</div>
+        <div class="metric-trend trend-flat" id="mTotalTrend">Awaiting first fetch</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-val" id="mHighAlert" style="color:var(--red2)">—</div>
+        <div class="metric-lbl">High-priority alerts</div>
+        <div class="metric-trend" id="mAlertTrend">—</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-val" id="mViolence" style="color:var(--amber2)">—</div>
+        <div class="metric-lbl">Violence/incident reports</div>
+        <div class="metric-trend" id="mViolenceTrend">—</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-val" id="mThreat" style="color:var(--green2)">—</div>
+        <div class="metric-lbl">Overall threat level</div>
+        <div class="metric-trend" id="mThreatTrend">—</div>
+      </div>
+    </div>
+
+    <!-- ANALYSIS PANEL - TOP -->
+    <div class="analysis-panel" id="analysisPanel">
+      <div class="analysis-header">
+        <span style="font-size:14px">🧠</span>
+        <span style="font-size:13px;font-weight:600;flex:1">Intelligence Summary</span>
+        <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)" id="analysisMeta">AI-powered · auto-updated</span>
+      </div>
+      <div class="refresh-progress"><div class="refresh-bar" id="progressBar" style="width:0%"></div></div>
+      <div class="analysis-body" id="analysisBody">
+        <div class="empty-state">
+          <span class="empty-icon">📡</span>
+          Press <strong>Fetch &amp; Analyse Now</strong> to run the first intelligence cycle.<br><br>
+          The dashboard will then auto-refresh every <strong>30 minutes</strong> (normal mode) or <strong>15 minutes</strong> on election day.
+        </div>
+      </div>
+      <div class="analysis-footer">
+        <span id="analysisTimestamp">Not yet run</span>
+        <span id="analysisModel">local-llm</span>
+      </div>
+    </div>
+
+    <!-- POLITICAL FIGURES MONITOR -->
+    <div class="figure-monitor" id="figureMonitorPanel">
+      <div class="figure-monitor-header">
+        <span style="font-size:14px">🕵️</span>
+        <span style="font-size:13px;font-weight:600;flex:1">Political Figures Monitor</span>
+        <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)" id="figMonitorMeta">Bankura district — key actors</span>
+      </div>
+      <div class="figure-monitor-grid" id="figureMonitorGrid">
+        <div style="grid-column:1/-1;padding:20px;text-align:center;color:var(--text3);font-size:12px">Run a fetch cycle to scan for mentions in live feeds</div>
+      </div>
+    </div>
+
+    <!-- FEEDS GRID -->
+    <div class="feeds-grid">
+      <div class="feed-panel" id="feedBankura">
+        <div class="feed-header">
+          <span class="feed-icon">📍</span>
+          <span class="feed-title">Bankura &amp; district feeds</span>
+          <span class="feed-badge fb-local">LOCAL</span>
+        </div>
+        <div class="feed-body" id="fbBankura"><div class="feed-loading">Awaiting fetch…</div></div>
+      </div>
+
+      <div class="feed-panel" id="feedSurrounds">
+        <div class="feed-header">
+          <span class="feed-icon">🗺</span>
+          <span class="feed-title">Surrounding districts</span>
+          <span class="feed-badge fb-local">REGIONAL</span>
+        </div>
+        <div class="feed-body" id="fbSurrounds"><div class="feed-loading">Awaiting fetch…</div></div>
+      </div>
+
+      <div class="feed-panel" id="feedAlerts">
+        <div class="feed-header">
+          <span class="feed-icon">⚠</span>
+          <span class="feed-title">Alerts &amp; violations</span>
+          <span class="feed-badge fb-alert">PRIORITY</span>
+        </div>
+        <div class="feed-body" id="fbAlerts"><div class="feed-loading">Awaiting fetch…</div></div>
+      </div>
+
+      <div class="feed-panel" id="feedMCC">
+        <div class="feed-header">
+          <span class="feed-icon">⚖</span>
+          <span class="feed-title">MCC, security &amp; official updates</span>
+          <span class="feed-badge fb-nat">OFFICIAL</span>
+        </div>
+        <div class="feed-body" id="fbMCC"><div class="feed-loading">Awaiting fetch…</div></div>
+      </div>
+
+      <div class="feed-panel" id="feedWB">
+        <div class="feed-header">
+          <span class="feed-icon">📺</span>
+          <span class="feed-title">West Bengal statewide</span>
+          <span class="feed-badge fb-wb">WB</span>
+        </div>
+        <div class="feed-body" id="fbWB"><div class="feed-loading">Awaiting fetch…</div></div>
+      </div>
+
+      <div class="feed-panel" id="feedParties">
+        <div class="feed-header">
+          <span class="feed-icon">🏛</span>
+          <span class="feed-title">Party statements — BJP · INC · CPI(M) · TMC</span>
+          <span class="feed-badge fb-parties">PARTIES</span>
+        </div>
+        <div class="feed-body" id="fbParties"><div class="feed-loading">Awaiting fetch…</div></div>
+      </div>
+
+      <div class="feed-panel full-width" id="feedBangla">
+        <div class="feed-header">
+          <span class="feed-icon">📰</span>
+          <span class="feed-title">Bengali media — Anandabazar · Eisamay · Zee 24 Ghanta · Bartaman (translated)</span>
+          <span class="feed-badge fb-bangla">বাংলা</span>
+        </div>
+        <div class="feed-body" id="fbBangla" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr))"><div class="feed-loading">Awaiting fetch…</div></div>
+      </div>
+    </div>
+
+  
+<!-- TIMELINE MODAL -->
+<div id="tlModal" class="tl-modal-overlay" style="display:none" onclick="if(event.target===this)closeTl()">
+  <div class="tl-modal">
+    <div class="tl-modal-header">
+      <span style="font-size:16px">📜</span>
+      <span class="tl-modal-title">Election Intelligence Timeline — Bankura 2026</span>
+      <span id="tlEntryCount" style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text2)"></span>
+    </div>
+    <div class="tl-modal-body" id="tlBody"></div>
+    <div class="tl-modal-footer">
+      <button class="tl-btn tl-primary" onclick="exportJSON()">⬇ Export JSON</button>
+      <button class="tl-btn tl-primary" onclick="exportCSV()">⬇ Export CSV</button>
+      <button class="tl-btn" onclick="openVideoExport()">🎬 Generate video</button>
+      <button class="tl-btn" onclick="closeTl()" style="margin-left:auto">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- VIDEO EXPORT MODAL -->
+<div id="videoModal" class="tl-modal-overlay" style="display:none" onclick="if(event.target===this)closeVideo()">
+  <div class="tl-modal" style="max-width:600px">
+    <div class="tl-modal-header">
+      <span style="font-size:16px">🎬</span>
+      <span class="tl-modal-title">Video Export — Election Timeline</span>
+    </div>
+    <div class="tl-modal-body" style="padding:20px">
+      <div style="font-size:13px;color:var(--text2);line-height:1.7;margin-bottom:16px">
+        This generates an <strong style="color:var(--text)">animated HTML slideshow</strong> of every intelligence cycle — one slide per update, with threat level, headlines, feeds, and analysis. You can:
+        <ul style="margin:8px 0 0 16px;color:var(--text2)">
+          <li>Open it in any browser as a self-contained file</li>
+          <li>Use <strong style="color:var(--text)">QuickTime → File → New Screen Recording</strong> to capture it as a video</li>
+          <li>Or use <strong style="color:var(--text)">OBS Studio</strong> (free) to record the browser window</li>
+        </ul>
+      </div>
+      <div style="background:var(--bg3);border-radius:8px;padding:14px;margin-bottom:16px">
+        <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text3);margin-bottom:8px">SLIDE SETTINGS</div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <label style="display:flex;align-items:center;gap:12px;font-size:13px;color:var(--text2)">
+            Seconds per slide
+            <input type="range" id="slideSpeed" min="3" max="30" value="8" step="1" style="flex:1">
+            <span id="slideSpeedVal" style="font-family:'JetBrains Mono',monospace;font-size:12px;min-width:28px;color:var(--accent2)">8s</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:12px;font-size:13px;color:var(--text2)">
+            <input type="checkbox" id="autoAdvance" checked style="width:14px;height:14px"> Auto-advance slides
+          </label>
+          <label style="display:flex;align-items:center;gap:12px;font-size:13px;color:var(--text2)">
+            <input type="checkbox" id="includeFeeds" checked style="width:14px;height:14px"> Include feed items in slides
+          </label>
+        </div>
+      </div>
+      <div id="videoMemWarning" style="display:none;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--amber2);margin-bottom:12px"></div>
+    </div>
+    <div class="tl-modal-footer">
+      <button class="tl-btn tl-primary" onclick="generateVideoHTML()">Generate slideshow HTML ⬇</button>
+      <button class="tl-btn" onclick="closeVideo()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+</div>
+</div>
+
+<script>
+
+/* ─── CONFIG ─── */
+var REFRESH_NORMAL   = 30 * 60 * 1000;
+var REFRESH_ELECTION = 15 * 60 * 1000;
+var isElectionMode   = false;
+var cycleCount = 0, alertCount = 0;
+var refreshTimer = null, countdownTimer = null;
+var nextRefreshAt = null, progressStart = null;
+var progressDuration = REFRESH_NORMAL;
+var chartThreat = null, chartTopics = null;
+var threatHistory = [], topicHistory = [];
+var currentParsed = null;  // stores last fetch result for chip expansion
+
+/* ─── TOPIC CHIP EXPAND / COLLAPSE ─── */
+// Mirrors Python _topic_counts() keyword sets.
+// Each entry: [keywords_to_match, panels_to_search]
+// panels_to_search: array of keys in parsed object
+var TOPIC_CHIP_CONFIG = [
+  {label:'Bankura violence',    kw:['bankura','violence','clash','attack','bomb'],   panels:['bankura','alerts']},
+  {label:'Bankura / Bishnupur', kw:['bankura','bishnupur'],                          panels:['bankura']},
+  {label:'Purulia / Jhargram',  kw:['purulia','jhargram'],                           panels:['surrounds']},
+  {label:'Birbhum / Bardhaman', kw:['birbhum','bardhaman'],                          panels:['surrounds']},
+  {label:'MCC violations',      kw:['mcc','model code','violation'],                 panels:['bankura','surrounds','statewide','alerts','official','parties','bangla']},
+  {label:'TMC vs BJP',          kw:['tmc','bjp','clash','confrontation','congress','cpim','trinamool'], panels:['bankura','surrounds','statewide','alerts','official','parties','bangla']},
+  {label:'EVM / VVPAT',         kw:['evm','vvpat'],                                  panels:['bankura','surrounds','statewide','alerts','official','parties','bangla']},
+  {label:'Paramilitary',        kw:['paramilitary','crpf','bsf','cisf','deployment'],panels:['official']},
+];
+
+function toggleChip(idx){
+  var drop = document.getElementById('chip-drop-'+idx);
+  if(!drop) return;
+  var isOpen = drop.classList.contains('open');
+  // close all first
+  document.querySelectorAll('.chip-dropdown.open').forEach(function(d){ d.classList.remove('open'); });
+  document.querySelectorAll('.topic-chip').forEach(function(c){ c.style.borderColor=''; });
+  if(isOpen) return; // was open → just close it
+
+  var cfg = TOPIC_CHIP_CONFIG[idx];
+  if(!cfg || !currentParsed){
+    drop.innerHTML = '<div class="chip-drop-empty">Run a fetch cycle first.</div>';
+    drop.classList.add('open');
+    return;
+  }
+
+  // Gather matching items from relevant panels
+  var matches = [];
+  cfg.panels.forEach(function(panel){
+    var items = currentParsed[panel] || [];
+    items.forEach(function(it){
+      var text = ((it.summary||'')+(it.source||'')).toLowerCase();
+      if(cfg.kw.some(function(k){ return text.includes(k); })){
+        matches.push({item:it, panel:panel});
+      }
+    });
+  });
+
+  if(!matches.length){
+    drop.innerHTML = '<div class="chip-drop-empty">No matching items in current cycle.</div>';
+  } else {
+    drop.innerHTML = matches.slice(0,8).map(function(m){
+      var it = m.it || m.item;
+      var url = it.url || '';
+      var link = url ? '<a href="'+url+'" target="_blank" rel="noopener">↗</a>' : '';
+      return '<div class="chip-drop-item">'+
+        '<span style="flex:1">'+(it.summary||'').substring(0,90)+(it.summary&&it.summary.length>90?'…':'')+'</span>'+
+        link+'</div>';
+    }).join('');
+  }
+  drop.classList.add('open');
+  // highlight active chip
+  document.querySelectorAll('.chip-wrap')[idx].querySelector('.topic-chip').style.borderColor='var(--accent)';
+}
+
+/* ─── CHARTS INIT ─── */
+function initCharts(){
+  var ctxT = document.getElementById('chartThreat').getContext('2d');
+  chartThreat = new Chart(ctxT,{
+    type:'line',
+    data:{
+      labels:[],
+      datasets:[{
+        label:'Threat',data:[],
+        borderColor:'#1a56db',backgroundColor:'rgba(26,86,219,0.08)',
+        tension:.4,pointRadius:4,pointBackgroundColor:'#1a56db',fill:true,
+        borderWidth:2
+      }]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){
+        var lvls=['LOW','MODERATE','HIGH','CRITICAL'];
+        return ' '+( lvls[c.raw-1]||c.raw);
+      }}}},
+      scales:{
+        y:{min:0,max:4,ticks:{stepSize:1,callback:function(v){
+          return ['','LOW','MOD','HIGH','CRIT'][v]||'';
+        }},grid:{color:'rgba(0,0,0,0.05)'}},
+        x:{ticks:{maxTicksLimit:6,font:{size:9}},grid:{display:false}}
+      }
+    }
+  });
+
+  var ctxB = document.getElementById('chartTopics').getContext('2d');
+  chartTopics = new Chart(ctxB,{
+    type:'bar',
+    data:{
+      labels:['Violence','Bankura','Surrounds','MCC','TMC/BJP','EVM','Parami.','Official'],
+      datasets:[{
+        data:[0,0,0,0,0,0,0,0],
+        backgroundColor:['#dc2626','#1a56db','#0891b2','#d97706','#7c3aed','#059669','#db2777','#64748b'],
+        borderRadius:4,borderSkipped:false
+      }]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{
+        y:{beginAtZero:true,ticks:{stepSize:1,font:{size:9}},grid:{color:'rgba(0,0,0,0.05)'}},
+        x:{ticks:{font:{size:9}},grid:{display:false}}
+      }
+    }
+  });
+}
+
+function updateCharts(metrics, topicCounts){
+  if(!chartThreat || !chartTopics) return;
+  var tlMap = {LOW:1,MODERATE:2,HIGH:3,CRITICAL:4};
+  var tlVal = tlMap[metrics.threatLevel||'LOW']||1;
+  threatHistory.push(tlVal);
+  if(threatHistory.length > 20) threatHistory.shift();
+
+  var now = new Date();
+  var lbl = now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');
+
+  chartThreat.data.labels.push(lbl);
+  if(chartThreat.data.labels.length > 20) chartThreat.data.labels.shift();
+  chartThreat.data.datasets[0].data = threatHistory.slice();
+  chartThreat.update('none');
+
+  if(topicCounts && topicCounts.length >= 8){
+    chartTopics.data.datasets[0].data = [
+      metrics.violenceReports||0,
+      topicCounts[1]||0, topicCounts[2]||0,
+      topicCounts[4]||0, topicCounts[5]||0,
+      topicCounts[6]||0, topicCounts[7]||0,
+      (topicCounts[4]||0)
+    ];
+    chartTopics.update('none');
+  }
+}
+
+function updateDistrictMap(analysis){
+  /* Simple heuristic: colour districts based on keywords in the analysis text */
+  var txt = JSON.stringify(analysis).toLowerCase();
+  var districts = [
+    {id:'dp-bankura',  keys:['bankura','bishnupur','barjora','taldangra','sonamukhi']},
+    {id:'dp-purulia',  keys:['purulia','jhalda','bagmundi']},
+    {id:'dp-jhargram', keys:['jhargram','binpur','gopiballavpur']},
+    {id:'dp-birbhum',  keys:['birbhum','siuri','bolpur','rampurhat']},
+    {id:'dp-bardhaman',keys:['bardhaman','durgapur','asansol','raniganj']},
+    {id:'dp-medinipur',keys:['medinipur','kharagpur','ghatal','daspur']},
+  ];
+  var violenceWords = ['violence','clash','attack','loot','bomb','assault','fire','arrest','detained'];
+  var moderateWords = ['tension','complaint','mcc','violation','protest','agitation'];
+
+  districts.forEach(function(d){
+    var el = document.getElementById(d.id);
+    if(!el) return;
+    var mentioned = d.keys.some(function(k){ return txt.includes(k); });
+    var violent   = mentioned && violenceWords.some(function(k){ return txt.includes(k); });
+    var moderate  = mentioned && moderateWords.some(function(k){ return txt.includes(k); });
+    var level = violent ? 'HIGH' : moderate ? 'MODERATE' : 'LOW';
+    el.className = el.className.replace(/threat-\w+/,'') + ' threat-' + level;
+    var badge = el.querySelector('.dist-badge');
+    if(badge) badge.textContent = level;
+  });
+}
+
+/* ─── ANI TICKER ─── */
+function updateTicker(items){
+  if(!items || !items.length) return;
+  var wrap = document.getElementById('tickerWrap');
+  var inner = document.getElementById('tickerInner');
+  if(!wrap || !inner) return;
+  wrap.style.display = 'flex';
+
+  var html = items.concat(items).map(function(it){
+    var url = it.url || '#';
+    var isLink = url && url !== '#';
+    if(isLink){
+      return '<a class="ticker-item" href="'+url+'" target="_blank">'+
+        (it.summary||it.text||'').substring(0,80)+'</a>'+
+        '<span class="ticker-sep">◆</span>';
+    }
+    return '<span class="ticker-item">'+(it.summary||it.text||'').substring(0,80)+'</span>'+
+      '<span class="ticker-sep">◆</span>';
+  }).join('');
+  inner.innerHTML = html;
+}
+
+/* ─── CONTEXTUAL IMAGES ─── */
+var IMG_LIBRARY = [
+  {src:'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a6/Bankura_district_map.svg/400px-Bankura_district_map.svg.png', cap:'Bankura district map'},
+  {src:'https://upload.wikimedia.org/wikipedia/commons/thumb/8/82/West_Bengal_district_map.svg/300px-West_Bengal_district_map.svg.png', cap:'West Bengal districts'},
+  {src:'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e2/Bishnupur_Terracotta_Temple_2.jpg/400px-Bishnupur_Terracotta_Temple_2.jpg', cap:'Bishnupur, Bankura'},
+  {src:'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b7/Susunia_hill_bankura.jpg/400px-Susunia_hill_bankura.jpg', cap:'Susunia, Bankura'},
+];
+
+function showContextImages(threatLevel){
+  var row = document.getElementById('imagesRow');
+  if(!row) return;
+  var html = IMG_LIBRARY.map(function(img){
+    return '<div class="img-card" onclick="window.open(\''+img.src+'\',\'_blank\')">' +
+      '<img src="'+img.src+'" alt="'+img.cap+'" onerror="this.parentElement.style.display=\'none\'">' +
+      '<div class="img-card-caption">'+img.cap+'</div></div>';
+  }).join('');
+  row.innerHTML = html;
+  row.style.display = 'grid';
+}
+
+/* ─── CLOCK ─── */
+function updateClock(){
+  var d = new Date();
+  document.getElementById('clock').textContent =
+    d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+setInterval(updateClock,1000); updateClock();
+
+/* ─── MODE TOGGLE ─── */
+function toggleMode(){
+  isElectionMode = !isElectionMode;
+  var badge = document.getElementById('modeBadge');
+  var btn   = document.getElementById('modeToggleBtn');
+  var intD  = document.getElementById('intervalDisplay');
+  if(isElectionMode){
+    badge.textContent='ELECTION DAY'; badge.className='mode-badge mode-election';
+    btn.innerHTML='🔵 Switch to Normal Mode';
+    intD.textContent='15 min'; progressDuration=REFRESH_ELECTION;
+  } else {
+    badge.textContent='NORMAL MODE'; badge.className='mode-badge';
+    btn.innerHTML='🚨 Election Day Mode';
+    intD.textContent='30 min'; progressDuration=REFRESH_NORMAL;
+  }
+  scheduleNext();
+}
+
+function scheduleNext(){
+  if(refreshTimer) clearTimeout(refreshTimer);
+  if(countdownTimer) clearInterval(countdownTimer);
+  var interval = isElectionMode ? REFRESH_ELECTION : REFRESH_NORMAL;
+  nextRefreshAt  = Date.now() + interval;
+  progressStart  = Date.now();
+  progressDuration = interval;
+  refreshTimer   = setTimeout(function(){ runFetch(false); }, interval);
+  countdownTimer = setInterval(updateCountdown, 1000);
+  updateCountdown();
+}
+
+function updateCountdown(){
+  if(!nextRefreshAt) return;
+  var remaining = Math.max(0, nextRefreshAt - Date.now());
+  var mins = Math.floor(remaining / 60000);
+  var secs = Math.floor((remaining % 60000) / 1000);
+  document.getElementById('nextRefreshDisplay').textContent =
+    'Next: '+String(mins).padStart(2,'0')+':'+String(secs).padStart(2,'0');
+  if(progressStart){
+    var pct = Math.min(100, ((Date.now()-progressStart)/progressDuration)*100);
+    document.getElementById('progressBar').style.width = pct+'%';
+  }
+}
+
+function setStatus(txt,color){
+  var lbl = document.getElementById('statusLabel');
+  var dot = document.getElementById('liveDot');
+  lbl.textContent = txt;
+  lbl.style.color  = color || '#4ade80';
+  dot.style.background = color ? color.replace('var(--','').replace(')','') : '#4ade80';
+}
+
+/* ─── API CALL (local proxy) ─── */
+async function callLLM(prompt, systemPrompt){
+  var headers = {'Content-Type':'application/json'};
+  var body = {
+    system: systemPrompt,
+    messages:[{role:'user',content:prompt}]
+  };
+  // Auto-detect port: when served by proxy use same origin; fallback to 5050 for file:// open
+  var endpoint = (location.protocol === 'http:' || location.protocol === 'https:')
+    ? location.origin + '/v1/messages'
+    : 'http://localhost:5050/v1/messages';
+  var ctrl = new AbortController();
+  var fetchTimer = setTimeout(function(){ ctrl.abort(); }, 660000); // 11 min (covers large models)
+  var resp;
+  try{
+    resp = await fetch(endpoint,{method:'POST',headers:headers,body:JSON.stringify(body),signal:ctrl.signal});
+  } finally { clearTimeout(fetchTimer); }
+
+  var data = await resp.json().catch(()=>({}));
+  if(!resp.ok||data.error){ throw new Error(data.error?.message||'Proxy error '+resp.status); }
+  return data;
+}
+
+function extractText(data){
+  if(data._combinedText) return data._combinedText;
+  return (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n');
+}
+
+/* ─── FEED RENDERING WITH LINKS ─── */
+function renderFeedItems(containerId, items){
+  var el = document.getElementById(containerId);
+  if(!el){ console.warn('renderFeedItems: missing element #'+containerId); return; }
+  if(!items||!items.length){
+    el.innerHTML='<div class="feed-loading">No items found this cycle.</div>'; return;
+  }
+  el.innerHTML = items.map(function(it){
+    var sev = it.severity||'low';
+    var sevClass = sev==='high'?'sev-high':sev==='medium'?'sev-med':'sev-low';
+    var sevLabel = sev==='high'?'HIGH':sev==='medium'?'MED':'LOW';
+    var url = it.url||it.link||'';
+    var linkHtml = url
+      ? '<a class="fi-link" href="'+url+'" target="_blank" rel="noopener">Read →</a>'
+      : '<a class="fi-link" href="https://news.google.com/search?q='+
+          encodeURIComponent((it.summary||'').substring(0,60))+
+          '+West+Bengal+election&hl=en-IN" target="_blank" rel="noopener">Search →</a>';
+    return '<div class="feed-item">'+
+      (function(){
+        var s=(it.source||'Unknown').toLowerCase();
+        var sc=s.includes('bjp')?'#f97316':s.includes('tmc')||s.includes('trinamool')||s.includes('aitc')?'#16a34a':s.includes('congress')||s.includes(' inc')?'#2563eb':s.includes('cpi')?'#dc2626':s.includes('ani')?'#7c3aed':'var(--accent)';
+        return '<div class="fi-source"><span class="fi-source-name" style="color:'+sc+'">'+((it.source)||'Unknown')+'</span>';
+      })()+
+      '<span class="fi-severity '+sevClass+'">'+sevLabel+'</span></div>'+
+      '<div class="fi-text">'+(it.summary||it.text||'')+'</div>'+
+      '<div class="fi-footer"><span class="fi-time">'+(it.time||new Date().toLocaleTimeString('en-IN'))+'</span>'+
+      linkHtml+'</div></div>';
+  }).join('');
+}
+
+/* ─── JSON REPAIR ─── */
+function repairJSON(text){
+  text = text.replace(/^```json\s*/,'').replace(/^```\s*/,'').replace(/```\s*$/,'').trim();
+  try{ return JSON.parse(text); }catch(e){}
+  var start = text.indexOf('{'); if(start===-1) return null;
+  var chunk = text.slice(start);
+  var opens=0,opensq=0,inStr=false,esc=false;
+  for(var i=0;i<chunk.length;i++){
+    var c=chunk[i];
+    if(esc){esc=false;continue;}
+    if(c==='\\'&&inStr){esc=true;continue;}
+    if(c==='"'){inStr=!inStr;continue;}
+    if(inStr)continue;
+    if(c==='{')opens++;else if(c==='}')opens--;
+    else if(c==='[')opensq++;else if(c===']')opensq--;
+  }
+  chunk=chunk.replace(/,\s*$/,'');
+  var suffix='';
+  if(opensq>0)suffix+=']'.repeat(opensq);
+  if(opens>0)suffix+='}' .repeat(opens);
+  try{ return JSON.parse(chunk+suffix); }catch(e2){}
+  var safe=chunk.replace(/,?\s*"[^"]*"\s*:\s*[\[{][^]*$/,'')+suffix;
+  try{ return JSON.parse(safe); }catch(e3){ return null; }
+}
+
+/* ─── MAIN FETCH CYCLE ─── */
+var _fetchInFlight = false;   // prevent overlapping requests
+
+async function runFetch(manual){
+  // Guard: skip if a fetch is already running (single LLM pipeline)
+  if(_fetchInFlight){
+    console.log('[runFetch] skipped — previous fetch still in progress');
+    return;
+  }
+  _fetchInFlight = true;
+
+  setStatus('FETCHING RSS…','#fbbf24');
+  document.getElementById('progressBar').style.width='10%';
+  cycleCount++;
+  document.getElementById('cycleCount').textContent = cycleCount;
+  var now = new Date();
+  var ts  = now.toLocaleString('en-IN');
+
+  var system = `Election intelligence analyst. Bankura district observer, WB 2026 Assembly Election. Phase 1: 23 April 2026. Current time: ${ts}.`;
+  var prompt = `Analyse the WB election situation for the Bankura observer. Current time: ${ts}.`;
+
+  try{
+    var data   = await callLLM(prompt, system);
+    setStatus('ANALYSING…','#38bdf8');
+    document.getElementById('progressBar').style.width='65%';
+    var text   = extractText(data);
+    var parsed = repairJSON(text);
+    if(!parsed) throw new Error('JSON parse failed. Snippet: '+text.replace(/\n/g,' ').substring(0,300));
+
+    var m = parsed.metrics||{};
+    document.getElementById('mTotalSignals').textContent = m.totalSignals||0;
+    document.getElementById('mHighAlert').textContent    = m.highAlerts||0;
+    document.getElementById('mViolence').textContent     = m.violenceReports||0;
+    document.getElementById('mTotalTrend').textContent   = ts;
+    var tl   = (m.threatLevel||'LOW').toUpperCase();
+    var tlEl = document.getElementById('mThreat');
+    tlEl.textContent  = tl;
+    tlEl.style.color  = tl==='CRITICAL'||tl==='HIGH' ? 'var(--red)' : tl==='MODERATE' ? 'var(--amber)' : 'var(--green)';
+    document.getElementById('mThreatTrend').textContent = ts;
+
+    alertCount += (m.highAlerts||0);
+    document.getElementById('alertCount').textContent = alertCount;
+
+    renderFeedItems('fbBankura',  parsed.bankura);
+    renderFeedItems('fbSurrounds',parsed.surrounds);
+    renderFeedItems('fbWB',       parsed.statewide);
+    renderFeedItems('fbParties',  parsed.parties);
+    renderFeedItems('fbAlerts',   parsed.alerts);
+    renderFeedItems('fbMCC',      parsed.official);
+    renderFeedItems('fbBangla',   parsed.bangla);
+
+    var an = parsed.analysis||{};
+    var bodyHtml = '';
+    bodyHtml += '<div class="section"><div class="sec-title">Situation headline</div><p class="highlight">'+(an.headline||'No headline')+'</p></div>';
+    bodyHtml += '<div class="section"><div class="sec-title">Bankura district</div><p>'+(an.bankuraSituation||'—')+'</p></div>';
+    bodyHtml += '<div class="section"><div class="sec-title">Surrounding districts</div><p>'+(an.surroundingSituation||'—')+'</p></div>';
+    if(an.partyPositions){
+      bodyHtml += '<div class="section"><div class="sec-title">Party positions &amp; allegations</div><p style="color:var(--purple)">'+(an.partyPositions||'—')+'</p></div>';
+    }
+    if(an.keyRisks&&an.keyRisks.length){
+      bodyHtml+='<div class="section"><div class="sec-title">Key risks</div>';
+      an.keyRisks.forEach(function(r){ bodyHtml+='<p class="risk">▸ '+r+'</p>'; });
+      bodyHtml+='</div>';
+    }
+    if(an.observerActions&&an.observerActions.length){
+      bodyHtml+='<div class="section"><div class="sec-title">Recommended observer actions</div>';
+      an.observerActions.forEach(function(a){ bodyHtml+='<p class="safe">✓ '+a+'</p>'; });
+      bodyHtml+='</div>';
+    }
+    bodyHtml+='<div class="section"><div class="sec-title">Disinfo watch</div><p>'+(an.disinfoAlerts||'None detected')+'</p></div>';
+    bodyHtml+='<div class="section"><div class="sec-title">Overall assessment</div><p>'+(an.overallAssessment||'—')+'</p></div>';
+    document.getElementById('analysisBody').innerHTML = bodyHtml;
+    document.getElementById('analysisTimestamp').textContent = 'Updated: '+ts;
+
+    if(tl!=='LOW'){
+      document.getElementById('alertBanner').classList.add('show');
+      document.getElementById('alertBannerText').textContent = '⚠️ '+( an.headline||'High-priority situation') + ' — See analysis below.';
+    } else {
+      document.getElementById('alertBanner').classList.remove('show');
+    }
+
+    if(parsed.topicCounts){
+      parsed.topicCounts.forEach(function(cnt,i){
+        var el=document.getElementById('cnt-'+i); if(el) el.textContent=cnt||0;
+      });
+    }
+
+    updateCharts(m, parsed.topicCounts);
+    updateDistrictMap(an);
+    updateTicker((parsed.alerts||[]).concat(parsed.bankura||[]));
+    renderFigureMonitor(parsed.figureMentions);
+    showContextImages(tl);
+
+    document.getElementById('lastRunTime').textContent = ts;
+    currentParsed = parsed;
+    pushCycle(ts, parsed);
+    setStatus('LIVE','#4ade80');
+    _fetchInFlight = false;
+    scheduleNext();
+
+  } catch(err){
+    _fetchInFlight = false;
+    var isAbort = err.name === 'AbortError';
+    var msg = isAbort
+      ? 'Request timed out after 5 min — proxy may be overloaded. Will retry.'
+      : err.message;
+    setStatus('ERROR','#f87171');
+    document.getElementById('analysisBody').innerHTML =
+      '<div class="empty-state" style="color:var(--red)"><span class="empty-icon">✕</span>'+
+      'Fetch failed: '+msg+'<br><br>'+
+      '<span style="color:var(--text3);font-size:12px">Check that proxy_local.py is running · Auto-retry next cycle</span></div>';
+    scheduleNext();
+  }
+}
+
+/* ═══════ AUTO-START + VISIBILITY CATCH-UP ═══════ */
+
+// 1. Auto-start: run first fetch automatically when page loads
+document.addEventListener('DOMContentLoaded', function(){
+  setTimeout(function(){ runFetch(false); }, 1200); // slight delay so DOM settles
+});
+
+// 2. Page Visibility API — tab comes back from background/sleep
+//    if scheduled refresh was missed, fire immediately
+document.addEventListener('visibilitychange', function(){
+  if(document.hidden) return;
+  if(!nextRefreshAt) return;
+  var overdue = Date.now() - nextRefreshAt;
+  if(overdue >= 0){
+    console.log('[visibility] refresh overdue by '+Math.round(overdue/1000)+'s — firing now');
+    if(refreshTimer)  clearTimeout(refreshTimer);
+    if(countdownTimer) clearInterval(countdownTimer);
+    runFetch(false);
+  }
+});
+
+// 3. Heartbeat every 60 s — catches setTimeout silently throttled by
+//    Chrome power-saver mode or OS sleep without visibility event
+setInterval(function(){
+  if(!nextRefreshAt || _fetchInFlight) return;
+  if(Date.now() > nextRefreshAt + 5000){   // 5 s grace period
+    console.log('[heartbeat] timer missed — firing catch-up fetch');
+    if(refreshTimer) clearTimeout(refreshTimer);
+    runFetch(false);
+  }
+}, 60000);
+
+/* ═══════ MEMORY SYSTEM ═══════ */
+/* ═══════ POLITICAL FIGURES MONITOR ═══════ */
+var PARTY_COLOR = {TMC:'tmc', BJP:'bjp', CPIM:'cpim'};
+var FIGURES_META = {
+  /* ── BJP 2026 CANDIDATES ─────────────────────────────────────────── */
+  "Chandana Bauri":             {},                                    // AC 247 Saltora (SC)
+  "Satyanarayan Mukhopadhyay":  {},                                    // AC 248 Chhatna
+  "Kshudiram Tudu":             {},                                    // AC 249 Ranibandh (ST)
+  "Kshetra Mohan Hansda":       {},                                    // AC 250 Raipur (ST)
+  "Souvik Patra":               {},                                    // AC 251 Taldangra
+  "Niladri Sekhar Dana":        {fb:"#"},                              // AC 252 Bankura (Sadar)
+  "Billeshwar Singha":          {},                                    // AC 253 Barjora
+  "Amarnath Shakha":            {},                                    // AC 254 Onda
+  "Viswajit Khan":              {},                                    // AC 255 Bishnupur
+  "Laxmikanta Majumdar":        {},                                    // AC 256 Kotulpur (SC)
+  "Nirmal Kumar Dhara":         {},                                    // AC 257 Indas (SC)
+  "Dibakar Gharami":            {},                                    // AC 258 Sonamukhi (SC)
+  /* ── TMC 2026 CANDIDATES ─────────────────────────────────────────── */
+  "Uttam Bauri":                {},                                    // AC 247 Saltora (SC)
+  "Swapan Kumar Mandal":        {},                                    // AC 248 Chhatna
+  "Dr. Tanushree Hansda":       {},                                    // AC 249 Ranibandh (ST)
+  "Thakur Moni Soren":          {},                                    // AC 250 Raipur (ST)
+  "Falguni Singhababu":         {},                                    // AC 251 Taldangra
+  "Dr. Anup Mondal":            {},                                    // AC 252 Bankura (Sadar)
+  "Goutam Mishra":              {},                                    // AC 253 Barjora
+  "Subrata Dutta":              {},                                    // AC 254 Onda
+  "Tanmoy Ghosh":               {},                                    // AC 255 Bishnupur
+  "Harakali Pratihar":          {},                                    // AC 256 Kotulpur (SC)
+  "Shyamali Roy Bagdi":         {},                                    // AC 257 Indas (SC)
+  "Dr. Kallol Saha":            {},                                    // AC 258 Sonamukhi (SC)
+  /* ── CPI(M) / LEFT FRONT CANDIDATES ─────────────────────────────── */
+  "Debalina Hembram":           {},                                    // AC 249 Ranibandh (ST)
+  "Rajib Kar":                  {},                                    // AC 248 Chhatna (RSP)
+  "Abhayananda Mukherjee":      {},                                    // AC 252 Bankura
+  "Sujit Chakraborty":          {},                                    // AC 253 Barjora
+  "Ramchandra Roy":             {},                                    // AC 256 Kotulpur (SC)
+  "Mona Mallick":               {},                                    // AC 257 Indas (SC)
+  "Ajit Roy":                   {},                                    // AC 258 Sonamukhi (SC)
+  /* ── KEY DISTRICT LEADERS ───────────────────────────────────────── */
+  "Saumitra Khan":              {fb:"https://www.facebook.com/saumitrakhanOfficial", tw:"https://x.com/KhanSaumitra"},
+  "Arup Chakraborty":           {},
+  "Dr. Subhas Sarkar":          {tw:"https://x.com/drsubhassarkar"},
+  "Basudeb Acharia":            {},
+};
+
+function renderFigureMonitor(figureMentions){
+  var grid = document.getElementById('figureMonitorGrid');
+  if(!grid || !figureMentions || !figureMentions.length) return;
+
+  var totalMentions = figureMentions.reduce(function(s,f){ return s + (f.count||0); }, 0);
+  var meta = document.getElementById('figMonitorMeta');
+  if(meta) meta.textContent = totalMentions + ' mention' + (totalMentions!==1?'s':'') + ' this cycle';
+
+  var sevColor = {high:'var(--red2)', medium:'var(--amber)', low:'var(--text3)'};
+  var sevBg    = {high:'rgba(220,38,38,0.12)', medium:'rgba(217,119,6,0.12)', low:'rgba(100,116,139,0.08)'};
+
+  grid.innerHTML = figureMentions.map(function(fig){
+    var pc = PARTY_COLOR[fig.party] || '';
+    var meta = FIGURES_META[fig.name] || {};
+    var links = '';
+    if(meta.fb && meta.fb !== '#') links += '<a class="fig-link" href="'+meta.fb+'" target="_blank">FB</a>';
+    if(meta.fb === '#')            links += '<a class="fig-link" href="#" onclick="return false">FB</a>';
+    if(meta.tw)                    links += '<a class="fig-link" href="'+meta.tw+'" target="_blank">X/TW</a>';
+
+    var mentionsHtml = '';
+    if(!fig.mentions || !fig.mentions.length){
+      mentionsHtml = '<div class="fig-no-mention">No mentions in current feeds</div>';
+    } else {
+      mentionsHtml = fig.mentions.slice(0,2).map(function(m){
+        var sc = sevColor[m.severity]||'var(--text3)';
+        var sb = sevBg[m.severity]||'transparent';
+        var badge = '<span class="sev-badge" style="background:'+sb+';color:'+sc+'">'+m.severity.toUpperCase()+'</span>';
+        var inner = badge + m.headline;
+        return '<div class="fig-headline">' +
+          (m.url ? '<a href="'+m.url+'" target="_blank">'+inner+'</a>' : inner) +
+          '</div>';
+      }).join('');
+    }
+
+    return '<div class="fig-card party-'+pc+'">' +
+      '<div class="fig-name">' +
+        '<span>'+fig.name+'</span>' +
+        '<span class="fig-party fig-party-'+pc+'">'+fig.party+'</span>' +
+      '</div>' +
+      '<div class="fig-role">'+fig.role+'</div>' +
+      (links ? '<div class="fig-links">'+links+'</div>' : '') +
+      '<div class="fig-mentions">' +
+        '<div class="fig-mention-count'+(fig.count?'  has-mentions':'')+'">'+
+          (fig.count ? '● '+fig.count+' mention'+(fig.count!==1?'s':'') : '○ No mentions') +
+        '</div>' +
+        mentionsHtml +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+/* ═══════ MEMORY SYSTEM ═══════ */
+var MEMORY_KEY = 'wb_election_intel_bankura_2026';
+function loadMemory(){ try{ return JSON.parse(localStorage.getItem(MEMORY_KEY)||'[]'); }catch(e){ return []; } }
+function saveMemory(arr){ try{ localStorage.setItem(MEMORY_KEY, JSON.stringify(arr)); }catch(e){} }
+function pushCycle(ts, parsed){
+  var mem = loadMemory();
+  mem.push({ts,iso:new Date().toISOString(),metrics:parsed.metrics||{},
+    bankura:parsed.bankura||[],surrounds:parsed.surrounds||[],
+    statewide:parsed.statewide||[],alerts:parsed.alerts||[],
+    official:parsed.official||[],analysis:parsed.analysis||{},
+    topicCounts:parsed.topicCounts||[]});
+  saveMemory(mem); updateMemCount();
+}
+function updateMemCount(){ var el=document.getElementById('memCount'); if(el) el.textContent=loadMemory().length; }
+function clearMemory(){
+  if(!confirm('Delete ALL '+loadMemory().length+' stored cycles? Cannot be undone.')) return;
+  localStorage.removeItem(MEMORY_KEY); updateMemCount(); alert('Memory cleared.');
+}
+updateMemCount();
+
+/* ═══════ TIMELINE MODAL ═══════ */
+function openTimeline(){
+  var mem=loadMemory();
+  var body=document.getElementById('tlBody');
+  document.getElementById('tlEntryCount').textContent=mem.length+' cycle'+(mem.length!==1?'s':'')+' stored';
+  if(!mem.length){ body.innerHTML='<div class="tl-empty">No cycles yet. Run a fetch first.</div>'; }
+  else{
+    body.innerHTML=mem.slice().reverse().map(function(c){
+      var tl=(c.metrics.threatLevel||'LOW').toUpperCase();
+      var dc='tl-dot-'+tl.toLowerCase();
+      var an=c.analysis||{};
+      var risks=(an.keyRisks||[]).filter(Boolean).map(function(r){ return '<span class="risk">▸ '+r+'</span>'; }).join(' ');
+      var acts=(an.observerActions||[]).filter(Boolean).map(function(a){ return '<span class="safe">✓ '+a+'</span>'; }).join(' ');
+      function feedBlock(title,items){
+        if(!items||!items.length) return '';
+        return '<div class="tl-feed-block"><div class="tl-feed-title">'+title+'</div>'+
+          items.slice(0,3).map(function(it){
+            var sc=it.severity==='high'?'color:var(--red)':it.severity==='medium'?'color:var(--amber)':'';
+            var linkHtml=it.url?'<a href="'+it.url+'" target="_blank" style="color:var(--accent);font-size:10px;margin-left:4px">↗</a>':'';
+            return '<div class="tl-feed-item" style="'+sc+'">'+(it.summary||'')+linkHtml+'</div>';
+          }).join('')+'</div>';
+      }
+      return '<div class="tl-entry"><div class="tl-dot '+dc+'"></div>'+
+        '<div class="tl-ts">'+c.ts+'</div>'+
+        '<div class="tl-headline">'+(an.headline||'—')+'</div>'+
+        '<div class="tl-meta">'+
+          '<span class="tl-tag tl-tag-threat-'+tl+'">'+tl+'</span>'+
+          '<span class="tl-tag tl-tag-stat">Signals: '+(c.metrics.totalSignals||0)+'</span>'+
+          '<span class="tl-tag tl-tag-stat">Alerts: '+(c.metrics.highAlerts||0)+'</span>'+
+          '<span class="tl-tag tl-tag-stat">Violence: '+(c.metrics.violenceReports||0)+'</span>'+
+        '</div>'+
+        '<div class="tl-analysis-block">'+
+          '<div style="color:var(--text);margin-bottom:4px">'+(an.bankuraSituation||'—')+'</div>'+
+          (an.partyPositions?'<div style="color:#7c3aed;margin-top:4px">Parties: '+an.partyPositions+'</div>':'')+
+          (risks?'<div style="margin-top:6px">'+risks+'</div>':'')+
+          (acts?'<div style="margin-top:4px">'+acts+'</div>':'')+
+          (an.disinfoAlerts&&an.disinfoAlerts!=='None detected'?'<div style="color:var(--amber);margin-top:4px">⚠️ Disinfo: '+an.disinfoAlerts+'</div>':'')+
+        '</div>'+
+        '<div class="tl-feeds">'+feedBlock('Bankura',c.bankura)+feedBlock('Surrounds',c.surrounds)+feedBlock('Statewide',c.statewide)+feedBlock('Alerts',c.alerts)+'</div>'+
+      '</div>';
+    }).join('');
+  }
+  document.getElementById('tlModal').style.display='flex';
+}
+function closeTl(){ document.getElementById('tlModal').style.display='none'; }
+
+/* ═══════ EXPORTS ═══════ */
+function exportJSON(){
+  var blob=new Blob([JSON.stringify(loadMemory(),null,2)],{type:'application/json'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='bankura_intel_'+new Date().toISOString().slice(0,10)+'.json';
+  a.click();
+}
+function exportCSV(){
+  var mem=loadMemory();
+  var rows=[['Timestamp','ThreatLevel','TotalSignals','HighAlerts','ViolenceReports','Headline','BankuraSituation','SurroundingSituation','PartyPositions','KeyRisks','ObserverActions','DisinfoAlerts','OverallAssessment']];
+  mem.forEach(function(c){
+    var an=c.analysis||{};
+    rows.push([c.ts,c.metrics.threatLevel||'',c.metrics.totalSignals||0,c.metrics.highAlerts||0,c.metrics.violenceReports||0,
+      (an.headline||'').replace(/,/g,';'),(an.bankuraSituation||'').replace(/,/g,';'),
+      (an.surroundingSituation||'').replace(/,/g,';'),(an.partyPositions||'').replace(/,/g,';'),
+      (an.keyRisks||[]).join(' | '),(an.observerActions||[]).join(' | '),
+      (an.disinfoAlerts||'').replace(/,/g,';'),(an.overallAssessment||'').replace(/,/g,';')]);
+  });
+  var csv=rows.map(function(r){ return r.map(function(v){ return '"'+String(v).replace(/"/g,'""')+'"'; }).join(','); }).join('\n');
+  var blob=new Blob([csv],{type:'text/csv'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download='bankura_intel_'+new Date().toISOString().slice(0,10)+'.csv'; a.click();
+}
+
+/* ═══════ VIDEO EXPORT ═══════ */
+function openVideoExport(){
+  closeTl();
+  var mem=loadMemory();
+  var warn=document.getElementById('videoMemWarning');
+  warn.style.display='block';
+  if(!mem.length){
+    warn.style.background='var(--redL)'; warn.style.color='var(--redD)'; warn.style.border='1px solid #fca5a5';
+    warn.textContent='No stored cycles yet. Run at least one fetch first.';
+  } else {
+    warn.style.background='var(--greenL)'; warn.style.color='var(--greenD)'; warn.style.border='1px solid #86efac';
+    warn.textContent=mem.length+' cycles available → will generate '+mem.length+' slides.';
+  }
+  var sp=document.getElementById('slideSpeed');
+  if(sp) sp.oninput=function(){ document.getElementById('slideSpeedVal').textContent=sp.value+'s'; };
+  document.getElementById('videoModal').style.display='flex';
+}
+function closeVideo(){ document.getElementById('videoModal').style.display='none'; }
+function generateVideoHTML(){
+  var mem=loadMemory();
+  if(!mem.length){ alert('No stored cycles.'); return; }
+  var speed=parseInt(document.getElementById('slideSpeed').value||'8',10)*1000;
+  var autoAdv=document.getElementById('autoAdvance').checked;
+  var incFeeds=document.getElementById('includeFeeds').checked;
+  function tc(tl){ return tl==='CRITICAL'||tl==='HIGH'?'#dc2626':tl==='MODERATE'?'#d97706':'#059669'; }
+  function sc(s){ return s==='high'?'#dc2626':s==='medium'?'#d97706':'#059669'; }
+  var slides=mem.map(function(c,i){
+    var an=c.analysis||{};
+    var tl=(c.metrics.threatLevel||'LOW').toUpperCase();
+    var col=tc(tl);
+    var progress=Math.round(((i+1)/mem.length)*100);
+    var feedsHtml='';
+    if(incFeeds){
+      function mf(lbl,items){
+        if(!items||!items.length) return '';
+        return '<div style="flex:1;min-width:180px"><div style="font-size:10px;color:#64748b;text-transform:uppercase;margin-bottom:4px">'+lbl+'</div>'+
+          items.slice(0,3).map(function(it){
+            var linkHtml=it.url?'<a href="'+it.url+'" target="_blank" style="color:#60a5fa;font-size:10px;margin-left:4px">↗</a>':'';
+            return '<div style="font-size:11px;color:'+sc(it.severity||'low')+';padding:3px 0;border-bottom:1px solid #1e293b">'+
+              (it.summary||'')+linkHtml+'</div>';
+          }).join('')+'</div>';
+      }
+      feedsHtml='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">'+mf('Bankura',c.bankura)+mf('Surrounds',c.surrounds)+mf('WB Statewide',c.statewide)+mf('Alerts',c.alerts)+'</div>';
+    }
+    var risks=(an.keyRisks||[]).filter(Boolean).map(function(r){ return '<div style="color:#f87171;font-size:12px;margin:2px 0">▸ '+r+'</div>'; }).join('');
+    var acts=(an.observerActions||[]).filter(Boolean).map(function(a){ return '<div style="color:#34d399;font-size:12px;margin:2px 0">✓ '+a+'</div>'; }).join('');
+    return '<div class="slide" id="s'+i+'" style="display:none">'+
+      '<div style="display:flex;justify-content:space-between;margin-bottom:14px">'+
+        '<div style="font-family:monospace;font-size:11px;color:#475569">BANKURA ELECTION INTEL 2026 · CYCLE '+(i+1)+'/'+mem.length+'</div>'+
+        '<div style="font-family:monospace;font-size:11px;color:#64748b">'+c.ts+'</div>'+
+      '</div>'+
+      '<div style="height:4px;background:#1e293b;border-radius:2px;margin-bottom:14px"><div style="height:100%;width:'+progress+'%;background:'+col+';border-radius:2px"></div></div>'+
+      '<div style="display:flex;align-items:center;gap:14px;margin-bottom:12px">'+
+        '<div style="background:'+col+'22;border:2px solid '+col+';border-radius:8px;padding:8px 16px;font-size:13px;font-weight:700;color:'+col+';font-family:monospace">'+tl+'</div>'+
+        '<div style="flex:1;font-size:18px;font-weight:700;color:#e2e8f0;line-height:1.3">'+(an.headline||'—')+'</div>'+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">'+
+        '<div style="background:#0f172a;border-radius:6px;padding:10px;text-align:center"><div style="font-size:22px;font-weight:700;color:#60a5fa;font-family:monospace">'+(c.metrics.totalSignals||0)+'</div><div style="font-size:10px;color:#64748b">Signals</div></div>'+
+        '<div style="background:#0f172a;border-radius:6px;padding:10px;text-align:center"><div style="font-size:22px;font-weight:700;color:#f87171;font-family:monospace">'+(c.metrics.highAlerts||0)+'</div><div style="font-size:10px;color:#64748b">High alerts</div></div>'+
+        '<div style="background:#0f172a;border-radius:6px;padding:10px;text-align:center"><div style="font-size:22px;font-weight:700;color:#fcd34d;font-family:monospace">'+(c.metrics.violenceReports||0)+'</div><div style="font-size:10px;color:#64748b">Violence</div></div>'+
+        '<div style="background:#0f172a;border-radius:6px;padding:10px;text-align:center"><div style="font-size:22px;font-weight:700;color:'+col+';font-family:monospace">'+tl.slice(0,4)+'</div><div style="font-size:10px;color:#64748b">Threat</div></div>'+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'+
+        '<div style="background:#0f172a;border-radius:6px;padding:10px;grid-column:1/-1"><div style="font-size:10px;color:#7c3aed;text-transform:uppercase;margin-bottom:4px">Party positions</div><div style="font-size:12px;color:#c4b5fd;line-height:1.5">'+(an.partyPositions||'No party data this cycle')+'</div></div>'+'<div style="background:#0f172a;border-radius:6px;padding:10px"><div style="font-size:10px;color:#475569;text-transform:uppercase;margin-bottom:4px">Bankura situation</div><div style="font-size:12px;color:#94a3b8;line-height:1.5">'+(an.bankuraSituation||'—')+'</div></div>'+
+        '<div style="background:#0f172a;border-radius:6px;padding:10px"><div style="font-size:10px;color:#475569;text-transform:uppercase;margin-bottom:4px">Surrounding districts</div><div style="font-size:12px;color:#94a3b8;line-height:1.5">'+(an.surroundingSituation||'—')+'</div></div>'+
+        '<div style="background:#0f172a;border-radius:6px;padding:10px"><div style="font-size:10px;color:#475569;text-transform:uppercase;margin-bottom:4px">Key risks</div>'+risks+'</div>'+
+        '<div style="background:#0f172a;border-radius:6px;padding:10px"><div style="font-size:10px;color:#475569;text-transform:uppercase;margin-bottom:4px">Observer actions</div>'+acts+'</div>'+
+      '</div>'+feedsHtml+'</div>';
+  }).join('');
+  var total=(mem.length*speed/1000).toFixed(0);
+  var vid='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Bankura Election Intel 2026 — Timeline</title>'+
+    '<style>*{box-sizing:border-box;margin:0;padding:0}body{background:#0b0f1a;color:#e2e8f0;font-family:-apple-system,sans-serif;height:100vh;overflow:hidden}'+
+    '#stage{width:100vw;height:100vh;display:flex;flex-direction:column}#wrap{flex:1;overflow:auto;padding:28px 36px}'+
+    '.slide{animation:fi .5s ease}@keyframes fi{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}'+
+    '#ctrl{background:#0d1117;border-top:1px solid #1e293b;padding:10px 20px;display:flex;align-items:center;gap:12px;flex-shrink:0}'+
+    '#ctrl button{background:#1a2235;border:1px solid #2a3f5f;color:#e2e8f0;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px}'+
+    '#ctrl button.p{background:#1a56db;border-color:#1a56db}'+
+    '#pw{flex:1;height:4px;background:#1e293b;border-radius:2px;overflow:hidden}'+
+    '#pf{height:100%;background:#1a56db;border-radius:2px;transition:width '+speed+'ms linear}'+
+    '#lbl{font-family:monospace;font-size:11px;color:#475569;white-space:nowrap}</style></head><body>'+
+    '<div id="stage"><div id="wrap">'+slides+'</div>'+
+    '<div id="ctrl"><button onclick="prev()">◀ Prev</button><button onclick="next()">Next ▶</button>'+
+    '<button id="at" class="'+(autoAdv?'p':'')+'" onclick="toggleA()">'+(autoAdv?'⏸ Auto ON':'▶ Auto OFF')+'</button>'+
+    '<div id="pw"><div id="pf" style="width:0%"></div></div>'+
+    '<div id="lbl">1/'+mem.length+'</div><button class="p" onclick="window.print()">🖨 PDF</button></div></div>'+
+    '<script>var c=0,t='+mem.length+',a='+(autoAdv?'true':'false')+',tmr=null,spd='+speed+';'+
+    'function show(n){document.querySelectorAll(".slide").forEach(function(s,i){s.style.display=i===n?"block":"none"});'+
+    'document.getElementById("lbl").textContent=(n+1)+"/"+t;'+
+    'document.getElementById("pf").style.width="0%";setTimeout(function(){document.getElementById("pf").style.width=Math.round(((n+1)/t)*100)+"%"},50);c=n;}'+
+    'function next(){show((c+1)%t);if(a)startT();}function prev(){show((c-1+t)%t);if(a)startT();}'+
+    'function startT(){clearTimeout(tmr);if(a)tmr=setTimeout(next,spd);}'+
+    'function toggleA(){a=!a;var b=document.getElementById("at");b.textContent=a?"⏸ Auto ON":"▶ Auto OFF";b.className=a?"p":"";if(a)startT();else clearTimeout(tmr);}'+
+    'show(0);if(a)startT();<\/script></body></html>';
+  var blob=new Blob([vid],{type:'text/html'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='bankura_timeline_'+new Date().toISOString().slice(0,10)+'.html';
+  a.click(); closeVideo();
+  alert('Slideshow downloaded!\n\nOpen in browser → use QuickTime or OBS to record.');
+}
+
+/* ─── CONNECTION BANNER ─── */
+(function(){
+  var el=document.getElementById('connMode');
+  if(!el) return;
+  var isFile=location.protocol==='file:';
+  var isLocal=location.hostname==='localhost'||location.hostname==='127.0.0.1';
+  if(isFile){
+    el.style.background='#fee2e2'; el.style.color='#991b1b'; el.style.border='1px solid #fca5a5';
+    el.textContent='⚠ file:// — run proxy_local.py';
+  } else if(isLocal){
+    el.style.background='#d1fae5'; el.style.color='#065f46'; el.style.border='1px solid #6ee7b7';
+    el.textContent='✓ local proxy active';
+  } else {
+    el.style.background='#fee2e2'; el.style.color='#991b1b'; el.style.border='1px solid #fca5a5';
+    el.textContent='⚠ run via localhost only';
+  }
+})();
+
+document.getElementById('progressBar').style.width='0%';
+initCharts();
+
+
+/* ── TIME WINDOW BADGES on feed headers ───────────────────────────────── */
+function addTimeBadge(panelId,label,color){
+  var panel=document.getElementById(panelId);
+  if(!panel) return;
+  var hdr=panel.querySelector('.feed-header');
+  if(!hdr||hdr.querySelector('.tw-badge')) return;
+  var b=document.createElement('span');
+  b.className='tw-badge';
+  b.style.cssText='font-size:9px;padding:2px 6px;border-radius:8px;font-family:JetBrains Mono,monospace;font-weight:700;margin-left:4px;background:'+color+'18;color:'+color+';border:1px solid '+color+'44';
+  b.textContent=label;
+  hdr.appendChild(b);
+}
+
+setTimeout(function(){
+  addTimeBadge('feedBankura',  '96h','#2563eb');
+  addTimeBadge('feedSurrounds','48h','#059669');
+  addTimeBadge('feedWB',       '48h','#059669');
+  addTimeBadge('feedParties',  '48h','#7c3aed');
+  addTimeBadge('feedAlerts',   '48h','#d97706');
+  addTimeBadge('feedMCC',      '48h','#d97706');
+},200);
+
+
+</script>
+</body>
+</html>
