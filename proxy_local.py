@@ -163,11 +163,11 @@ def _digest_one(row_dict, ollama_base, model):
     content  = body if len(body) > 200 else title
     prompt = (
         f"Election intelligence analyst, Bankura district observer, WB 2026.\n"
-        f"Write a 3-sentence digest of this {severity}-priority article "
-        f"from '{source}' [{panel} feed].\n"
-        f"Sentence 1 — What happened (facts only).\n"
-        f"Sentence 2 — Who is involved and where.\n"
-        f"Sentence 3 — Why it matters for Bankura Phase 1 (23 Apr 2026) observer.\n\n"
+        f"Write a digest of this {severity}-priority article from '{source}' [{panel} feed].\n"
+        f"Output exactly 3 numbered points, each a single sentence, no headings or labels:\n"
+        f"1. What happened (facts only).\n"
+        f"2. Who is involved and where.\n"
+        f"3. Why it matters for Bankura Phase 1 (23 Apr 2026) observer.\n\n"
         f"Article: {content}\n\nDigest:"
     )
     try:
@@ -494,6 +494,16 @@ RSS_FEEDS = [
     # Bengali Google News — WB Phase 1 general
     ("bangla", "Bengali News: পশ্চিমবঙ্গ ভোট",
      gnews_bn("পশ্চিমবঙ্গ বিধানসভা নির্বাচন ২০২৬ প্রথম দফা")),
+    # ── YOUTUBE CHANNELS — via Google News index (direct YT RSS blocked server-side) ─
+    # ABP Ananda (channel: UCwzOMowuG2q5Xgf9LIRJbSg)
+    ("bangla", "ABP Ananda YouTube: election 2026",
+     gnews("ABP Ananda election West Bengal 2026 site:youtube.com")),
+    # Zee 24 Ghanta (channel: UCIvaYmXn910QMdemBG3v1pQ)
+    ("bangla", "Zee 24 Ghanta YouTube: election 2026",
+     gnews("Zee 24 Ghanta election West Bengal 2026 site:youtube.com")),
+    # TV9 Bangla
+    ("bangla", "TV9 Bangla YouTube: election 2026",
+     gnews("TV9 Bangla election West Bengal 2026 site:youtube.com")),
 ]
 
 # Social media monitoring URLs (shown in dashboard as clickable links, not RSS)

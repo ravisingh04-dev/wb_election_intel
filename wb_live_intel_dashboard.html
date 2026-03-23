@@ -219,6 +219,22 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 .refresh-progress{height:2px;background:var(--border);position:relative;overflow:hidden}
 .refresh-bar{height:100%;background:var(--accent);transition:width 1s linear}
 
+/* INTEL GRID — 3-col top strip */
+.intel-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;align-items:start}
+/* MID ROW — figures + trend (flex so trend collapses cleanly when hidden) */
+.mid-row{display:flex;gap:14px;align-items:flex-start}
+.mid-row>*{flex:1;min-width:0}
+/* TELEGRAM PANEL */
+.tg-panel{background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+.tg-header{padding:10px 14px;border-bottom:1px solid var(--border);background:var(--bg3);display:flex;align-items:center;gap:8px}
+.tg-body{padding:14px;flex:1;font-size:12px;min-height:80px}
+.tg-post{padding:7px 10px;border-left:2px solid var(--border2);margin-bottom:8px;font-size:12px;color:var(--text2);line-height:1.5;border-radius:0 6px 6px 0}
+.tg-post.tg-high{border-left-color:var(--red)}
+.tg-post.tg-med{border-left-color:var(--amber)}
+.tg-post-meta{font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3);margin-bottom:3px;display:flex;gap:6px}
+@media(max-width:960px){.intel-grid{grid-template-columns:1fr 1fr}.intel-grid .tg-panel{grid-column:1/-1}}
+@media(max-width:600px){.intel-grid{grid-template-columns:1fr}.mid-row{flex-direction:column}}
+
 /* SCROLLBAR */
 ::-webkit-scrollbar{width:4px}
 ::-webkit-scrollbar-track{background:#f1f5f9}
@@ -310,7 +326,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 /* ── FIGURE MONITOR ── */
 .figure-monitor{background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden}
 .figure-monitor-header{padding:10px 14px;border-bottom:1px solid var(--border);background:var(--bg3);display:flex;align-items:center;gap:8px}
-.figure-monitor-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;padding:12px}
+.figure-monitor-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:10px;padding:12px}
 .fig-card{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 12px;border-left:3px solid var(--border2);transition:box-shadow .15s}
 .fig-card:hover{box-shadow:0 2px 8px rgba(0,0,0,0.08)}
 .fig-card.party-tmc{border-left-color:#10b981}
@@ -553,56 +569,94 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
       </div>
     </div>
 
-    <!-- ANALYSIS PANEL - TOP -->
-    <div class="analysis-panel" id="analysisPanel">
-      <div class="analysis-header">
-        <span style="font-size:14px">🧠</span>
-        <span style="font-size:13px;font-weight:600;flex:1">Intelligence Summary</span>
-        <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)" id="analysisMeta">AI-powered · auto-updated</span>
-      </div>
-      <div class="refresh-progress"><div class="refresh-bar" id="progressBar" style="width:0%"></div></div>
-      <div class="analysis-body" id="analysisBody">
-        <div class="empty-state">
-          <span class="empty-icon">📡</span>
-          Press <strong>Fetch &amp; Analyse Now</strong> to run the first intelligence cycle.<br><br>
-          The dashboard will then auto-refresh every <strong>30 minutes</strong> (normal mode) or <strong>15 minutes</strong> on election day.
+    <!-- INTEL GRID: Bankura | Statewide | Telegram Live -->
+    <div class="intel-grid">
+
+      <!-- LEFT: Bankura district intel -->
+      <div class="analysis-panel" id="analysisBankura">
+        <div class="analysis-header">
+          <span style="font-size:14px">📍</span>
+          <span style="font-size:13px;font-weight:600;flex:1">Bankura Intel</span>
+          <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)" id="analysisMeta">AI-powered · auto-updated</span>
+        </div>
+        <div class="refresh-progress"><div class="refresh-bar" id="progressBar" style="width:0%"></div></div>
+        <div class="analysis-body" id="analysisBankuraBody">
+          <div class="empty-state">
+            <span class="empty-icon">📡</span>
+            Press <strong>Fetch &amp; Analyse Now</strong> to run the first intelligence cycle.<br><br>
+            Auto-refreshes every <strong>30 min</strong> (15 min on election day).
+          </div>
+        </div>
+        <div class="analysis-footer">
+          <span id="analysisTimestamp">Not yet run</span>
+          <span id="analysisModel">local-llm</span>
         </div>
       </div>
-      <div class="analysis-footer">
-        <span id="analysisTimestamp">Not yet run</span>
-        <span id="analysisModel">local-llm</span>
+
+      <!-- CENTRE: Statewide WB intel -->
+      <div class="analysis-panel" id="analysisStatewide">
+        <div class="analysis-header">
+          <span style="font-size:14px">🗺️</span>
+          <span style="font-size:13px;font-weight:600;flex:1">Statewide Intel</span>
+          <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)">WB Phase 1 context</span>
+        </div>
+        <div class="analysis-body" id="analysisStatewideBody">
+          <div class="empty-state">
+            <span class="empty-icon">🗺️</span>
+            Awaiting first fetch cycle.
+          </div>
+        </div>
       </div>
+
+      <!-- RIGHT: Telegram Live Feed (Phase 3A placeholder) -->
+      <div class="tg-panel" id="telegramPanel">
+        <div class="tg-header">
+          <span style="font-size:14px">✈️</span>
+          <span style="font-size:13px;font-weight:600;flex:1">Telegram Live</span>
+          <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)" id="tgMeta">Phase 3A</span>
+        </div>
+        <div class="tg-body" id="telegramBody">
+          <div class="empty-state" style="text-align:center;padding:20px 12px">
+            <span class="empty-icon" style="font-size:26px">✈️</span>
+            <div style="font-size:12px;color:var(--text3);margin-top:8px;line-height:1.6">Telegram channel archiver<br>coming in <strong style="color:var(--text2)">Phase 3A</strong></div>
+          </div>
+        </div>
+      </div>
+
     </div>
 
-    <!-- POLITICAL FIGURES MONITOR -->
-    <div class="figure-monitor" id="figureMonitorPanel">
-      <div class="figure-monitor-header">
-        <span style="font-size:14px">🕵️</span>
-        <span style="font-size:13px;font-weight:600;flex:1">Political Figures Monitor</span>
-        <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)" id="figMonitorMeta">Bankura district — key actors</span>
-      </div>
-      <div class="figure-monitor-grid" id="figureMonitorGrid">
-        <div style="grid-column:1/-1;padding:20px;text-align:center;color:var(--text3);font-size:12px">Run a fetch cycle to scan for mentions in live feeds</div>
-      </div>
-    </div>
+    <!-- MID ROW: Political Figures + Trend Sparkline -->
+    <div class="mid-row">
 
-    <!-- THREAT & SENTIMENT TREND SPARKLINE (hidden until first cycle completes) -->
-    <div class="trend-panel" id="trendPanel" style="display:none">
-      <div class="trend-header">
-        <span>📈</span>
-        <span>Threat &amp; Signal Trend</span>
-        <span class="trend-meta" id="trendMeta">0 cycles stored</span>
+      <div class="figure-monitor" id="figureMonitorPanel">
+        <div class="figure-monitor-header">
+          <span style="font-size:14px">🕵️</span>
+          <span style="font-size:13px;font-weight:600;flex:1">Political Figures Monitor</span>
+          <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)" id="figMonitorMeta">Bankura district — key actors</span>
+        </div>
+        <div class="figure-monitor-grid" id="figureMonitorGrid">
+          <div style="grid-column:1/-1;padding:20px;text-align:center;color:var(--text3);font-size:12px">Run a fetch cycle to scan for mentions in live feeds</div>
+        </div>
       </div>
-      <div class="trend-chart-wrap">
-        <canvas id="trendCanvas"></canvas>
+
+      <div class="trend-panel" id="trendPanel" style="display:none">
+        <div class="trend-header">
+          <span>📈</span>
+          <span>Threat &amp; Signal Trend</span>
+          <span class="trend-meta" id="trendMeta">0 cycles stored</span>
+        </div>
+        <div class="trend-chart-wrap">
+          <canvas id="trendCanvas"></canvas>
+        </div>
+        <div class="trend-legend">
+          <span class="trend-l-low">Low threat</span>
+          <span class="trend-l-mod">Moderate</span>
+          <span class="trend-l-high">High / Critical</span>
+          <span class="trend-l-alert">High alerts (dashed)</span>
+          <span class="trend-l-viol">Violence reports (dotted)</span>
+        </div>
       </div>
-      <div class="trend-legend">
-        <span class="trend-l-low">Low threat</span>
-        <span class="trend-l-mod">Moderate</span>
-        <span class="trend-l-high">High / Critical</span>
-        <span class="trend-l-alert">High alerts (dashed)</span>
-        <span class="trend-l-viol">Violence reports (dotted)</span>
-      </div>
+
     </div>
 
     <!-- FEEDS GRID -->
@@ -1183,26 +1237,32 @@ async function runFetch(manual){
     renderFeedItems('fbBangla',   parsed.bangla);
 
     var an = parsed.analysis||{};
-    var bodyHtml = '';
-    bodyHtml += '<div class="section"><div class="sec-title">Situation headline</div><p class="highlight">'+(an.headline||'No headline')+'</p></div>';
-    bodyHtml += '<div class="section"><div class="sec-title">Bankura district</div><p>'+(an.bankuraSituation||'—')+'</p></div>';
-    bodyHtml += '<div class="section"><div class="sec-title">Surrounding districts</div><p>'+(an.surroundingSituation||'—')+'</p></div>';
-    if(an.partyPositions){
-      bodyHtml += '<div class="section"><div class="sec-title">Party positions &amp; allegations</div><p style="color:var(--purple)">'+(an.partyPositions||'—')+'</p></div>';
-    }
+
+    // ── LEFT PANEL: Bankura-specific ──────────────────────────────────────
+    var bankuraHtml = '';
+    bankuraHtml += '<div class="section"><div class="sec-title">Situation headline</div><p class="highlight">'+(an.headline||'No headline')+'</p></div>';
+    bankuraHtml += '<div class="section"><div class="sec-title">Bankura district</div><p>'+(an.bankuraSituation||'—')+'</p></div>';
     if(an.keyRisks&&an.keyRisks.length){
-      bodyHtml+='<div class="section"><div class="sec-title">Key risks</div>';
-      an.keyRisks.forEach(function(r){ bodyHtml+='<p class="risk">▸ '+r+'</p>'; });
-      bodyHtml+='</div>';
+      bankuraHtml+='<div class="section"><div class="sec-title">Key risks</div>';
+      an.keyRisks.forEach(function(r){ bankuraHtml+='<p class="risk">▸ '+r+'</p>'; });
+      bankuraHtml+='</div>';
     }
     if(an.observerActions&&an.observerActions.length){
-      bodyHtml+='<div class="section"><div class="sec-title">Recommended observer actions</div>';
-      an.observerActions.forEach(function(a){ bodyHtml+='<p class="safe">✓ '+a+'</p>'; });
-      bodyHtml+='</div>';
+      bankuraHtml+='<div class="section"><div class="sec-title">Observer actions</div>';
+      an.observerActions.forEach(function(a){ bankuraHtml+='<p class="safe">✓ '+a+'</p>'; });
+      bankuraHtml+='</div>';
     }
-    bodyHtml+='<div class="section"><div class="sec-title">Disinfo watch</div><p>'+(an.disinfoAlerts||'None detected')+'</p></div>';
-    bodyHtml+='<div class="section"><div class="sec-title">Overall assessment</div><p>'+(an.overallAssessment||'—')+'</p></div>';
-    document.getElementById('analysisBody').innerHTML = bodyHtml;
+    document.getElementById('analysisBankuraBody').innerHTML = bankuraHtml;
+
+    // ── CENTRE PANEL: Statewide context ───────────────────────────────────
+    var statewideHtml = '';
+    statewideHtml += '<div class="section"><div class="sec-title">Surrounding districts</div><p>'+(an.surroundingSituation||'—')+'</p></div>';
+    if(an.partyPositions){
+      statewideHtml += '<div class="section"><div class="sec-title">Party positions &amp; allegations</div><p style="color:var(--purple)">'+(an.partyPositions||'—')+'</p></div>';
+    }
+    statewideHtml+='<div class="section"><div class="sec-title">Disinfo watch</div><p>'+(an.disinfoAlerts||'None detected')+'</p></div>';
+    statewideHtml+='<div class="section"><div class="sec-title">Overall assessment</div><p>'+(an.overallAssessment||'—')+'</p></div>';
+    document.getElementById('analysisStatewideBody').innerHTML = statewideHtml;
     document.getElementById('analysisTimestamp').textContent = 'Updated: '+ts;
 
     if(tl!=='LOW'){
@@ -1242,10 +1302,11 @@ async function runFetch(manual){
       ? 'Request timed out after 5 min — proxy may be overloaded. Will retry.'
       : err.message;
     setStatus('ERROR','#f87171');
-    document.getElementById('analysisBody').innerHTML =
-      '<div class="empty-state" style="color:var(--red)"><span class="empty-icon">✕</span>'+
+    var errHtml = '<div class="empty-state" style="color:var(--red)"><span class="empty-icon">✕</span>'+
       'Fetch failed: '+msg+'<br><br>'+
       '<span style="color:var(--text3);font-size:12px">Check that proxy_local.py is running · Auto-retry next cycle</span></div>';
+    document.getElementById('analysisBankuraBody').innerHTML = errHtml;
+    document.getElementById('analysisStatewideBody').innerHTML = '';
     scheduleNext();
   }
 }
@@ -1638,8 +1699,8 @@ function renderFigureMonitor(figureMentions){
     return (a.name||'').localeCompare(b.name||'');
   });
 
-  /* ── Split into visible (top 9) and hidden (rest) ── */
-  var VISIBLE_MAX = 9;
+  /* ── Split into visible (top 3 with mentions) and hidden (rest) ── */
+  var VISIBLE_MAX = 3;
   var visible = sorted.slice(0, VISIBLE_MAX);
   var hidden  = sorted.slice(VISIBLE_MAX);
 
@@ -1985,7 +2046,9 @@ function _digestCard(art, readSet){
 
   var bodyHtml = '';
   if(art.digest_status === 'done' && art.digest){
-    bodyHtml = '<div class="da-digest">'+_esc(art.digest)+'</div>';
+    bodyHtml = '<div class="da-digest">'+_esc(art.digest)
+      .replace(/Sentence (\d+)\s*[—–-][^:]*:\s*/g,'$1. ')
+      .replace(/\n/g,'<br>')+'</div>';
   } else if(art.digest_status === 'pending' || art.digest_status === 'processing'){
     bodyHtml = '<div class="da-pending">⏳ Digest generating…</div>';
   } else if(art.digest_status === 'failed'){
