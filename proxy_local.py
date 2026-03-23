@@ -22,15 +22,245 @@ Then open: http://localhost:5050
 """
 
 import sys, os, json, re, argparse, threading, time, socket, socketserver, urllib.request, urllib.error
-import webbrowser, xml.etree.ElementTree as ET
+import webbrowser, xml.etree.ElementTree as ET, sqlite3
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlparse
 
 SCRIPT_DIR     = Path(__file__).parent.resolve()
 DASHBOARD_FILE = SCRIPT_DIR / "wb_live_intel_dashboard.html"
 OSINT_FILE     = SCRIPT_DIR / "wb_osint_monitor.html"
 DEFAULT_PORT   = 5050
+
+# ─── PHASE 2 FEATURE FLAGS ────────────────────────────────────────────────────
+# Set to False to instantly disable without touching any other code.
+FEATURE_SQLITE  = True   # persist cycles + articles to bankura_intel.db
+FEATURE_DIGEST  = True   # background LLM digest of MED/HIGH articles
+
+DB_PATH  = SCRIPT_DIR / "bankura_intel.db"
+_db_lock = threading.Lock()   # single write-lock for all DB operations
+
+# ─── SQLite helpers ───────────────────────────────────────────────────────────
+
+def _db_conn():
+    c = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=15)
+    c.row_factory = sqlite3.Row
+    return c
+
+def _db_init():
+    """Create tables on first run. Safe to call repeatedly (IF NOT EXISTS)."""
+    if not FEATURE_SQLITE:
+        return
+    with _db_lock:
+        c = _db_conn()
+        c.executescript("""
+            CREATE TABLE IF NOT EXISTS digested_articles (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                url           TEXT    UNIQUE,
+                title         TEXT,
+                source        TEXT,
+                severity      TEXT,
+                panel         TEXT,
+                published_at  TEXT,
+                first_seen    TEXT,
+                full_text     TEXT,
+                digest        TEXT,
+                digest_status TEXT DEFAULT 'pending',
+                digested_at   TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_da_status   ON digested_articles(digest_status);
+            CREATE INDEX IF NOT EXISTS idx_da_severity ON digested_articles(severity);
+            CREATE INDEX IF NOT EXISTS idx_da_seen     ON digested_articles(first_seen);
+            CREATE TABLE IF NOT EXISTS cycles (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                fetched_at       TEXT,
+                threat_level     TEXT,
+                total_signals    INTEGER,
+                high_alerts      INTEGER,
+                violence_reports INTEGER,
+                full_json        TEXT
+            );
+        """)
+        c.commit(); c.close()
+    print(f"  [DB] Initialised: {DB_PATH}")
+
+def _save_digest_candidates(panel_items):
+    """
+    After each fetch, queue new MED/HIGH articles for background digesting.
+    Dedup by URL — INSERT OR IGNORE means same article from multiple feeds
+    is stored only once.
+    """
+    if not FEATURE_SQLITE or not FEATURE_DIGEST:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    # Panel priority: what the observer cares about most, first
+    panel_order = ["bankura","alerts","surrounds","statewide","official","parties","bangla"]
+    candidates = []
+    seen_urls  = set()
+    for panel in panel_order:
+        for item in panel_items.get(panel, []):
+            url = (item.get("url") or "").strip()
+            if not url or url in seen_urls:
+                continue
+            sev = _score_severity(item.get("title","") + " " + item.get("desc",""))
+            if sev not in ("high", "medium"):
+                continue
+            seen_urls.add(url)
+            candidates.append((
+                url,
+                (item.get("title") or "")[:500],
+                item.get("source",""),
+                sev, panel,
+                item.get("time",""), now
+            ))
+    if not candidates:
+        return
+    with _db_lock:
+        c = _db_conn()
+        inserted = 0
+        for row in candidates:
+            c.execute("""
+                INSERT OR IGNORE INTO digested_articles
+                  (url, title, source, severity, panel, published_at, first_seen, digest_status)
+                VALUES (?,?,?,?,?,?,?,'pending')
+            """, row)
+            if c.execute("SELECT changes()").fetchone()[0]:
+                inserted += 1
+        c.commit(); c.close()
+    if inserted:
+        print(f"  [digest] +{inserted} article(s) queued")
+
+def _fetch_article_text(url, timeout=8):
+    """
+    Try to GET full article HTML and extract paragraph text.
+    Returns extracted text (up to 3000 chars) or None if blocked/paywalled.
+    No external dependencies — pure stdlib.
+    """
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+            "Accept-Language": "en-IN,en;q=0.9",
+        })
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read(200_000).decode("utf-8", errors="replace")
+        paras = re.findall(r'<p[^>]*>\s*([^<]{60,})\s*</p>', raw, re.I)
+        text  = " ".join(p.strip() for p in paras[:20])
+        text  = re.sub(r'<[^>]+>', ' ', text)
+        text  = re.sub(r'\s{2,}', ' ', text).strip()
+        return text[:3000] if len(text) > 120 else None
+    except Exception:
+        return None
+
+def _digest_one(row_dict, ollama_base, model):
+    """Call Ollama to produce a 3-sentence digest. Returns string or None."""
+    title    = row_dict.get("title","")
+    body     = row_dict.get("full_text") or ""
+    source   = row_dict.get("source","")
+    panel    = row_dict.get("panel","")
+    severity = (row_dict.get("severity") or "medium").upper()
+    content  = body if len(body) > 200 else title
+    prompt = (
+        f"Election intelligence analyst, Bankura district observer, WB 2026.\n"
+        f"Write a 3-sentence digest of this {severity}-priority article "
+        f"from '{source}' [{panel} feed].\n"
+        f"Sentence 1 — What happened (facts only).\n"
+        f"Sentence 2 — Who is involved and where.\n"
+        f"Sentence 3 — Why it matters for Bankura Phase 1 (23 Apr 2026) observer.\n\n"
+        f"Article: {content}\n\nDigest:"
+    )
+    try:
+        payload = json.dumps({
+            "model":    model,
+            "messages": [{"role":"user","content":prompt}],
+            "stream":   False,
+            "options":  {"temperature":0.1,"num_ctx":2048,"think":False},
+        }).encode()
+        req = urllib.request.Request(
+            f"{ollama_base}/api/chat",
+            data=payload,
+            headers={"Content-Type":"application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            data = json.loads(resp.read())
+        msg = data.get("message") or {}
+        return (msg.get("content") or "").strip() or None
+    except Exception as e:
+        print(f"  [digest] LLM error: {e}")
+        return None
+
+_digest_worker_active = False
+
+def _start_digest_worker(ollama_base, model):
+    """Launch the background digest thread (daemon — exits with main process)."""
+    if not FEATURE_SQLITE or not FEATURE_DIGEST:
+        return
+    def _worker():
+        global _digest_worker_active
+        _digest_worker_active = True
+        print("  [digest] Background worker started")
+        while True:
+            try:
+                with _db_lock:
+                    c = _db_conn()
+                    row = c.execute("""
+                        SELECT id, url, title, source, severity, panel, full_text
+                        FROM digested_articles WHERE digest_status='pending'
+                        ORDER BY CASE severity WHEN 'high' THEN 1 ELSE 2 END,
+                                 CASE panel WHEN 'bankura' THEN 1 WHEN 'alerts' THEN 2
+                                            WHEN 'surrounds' THEN 3 ELSE 4 END,
+                                 first_seen ASC
+                        LIMIT 1
+                    """).fetchone()
+                    c.close()
+
+                if row is None:
+                    time.sleep(300); continue   # idle: check every 5 min
+
+                rid   = row["id"]
+                title = row["title"]
+                url   = row["url"]
+
+                # Mark in-progress to prevent double processing
+                with _db_lock:
+                    c = _db_conn()
+                    c.execute("UPDATE digested_articles SET digest_status='processing' WHERE id=?", (rid,))
+                    c.commit(); c.close()
+
+                print(f"  [digest] Fetching: {title[:70]}…")
+                full_text = _fetch_article_text(url) or ""
+                if full_text:
+                    with _db_lock:
+                        c = _db_conn()
+                        c.execute("UPDATE digested_articles SET full_text=? WHERE id=?", (full_text, rid))
+                        c.commit(); c.close()
+
+                row_dict = dict(row); row_dict["full_text"] = full_text
+                digest   = _digest_one(row_dict, ollama_base, model)
+                now      = datetime.now(timezone.utc).isoformat()
+
+                with _db_lock:
+                    c = _db_conn()
+                    if digest:
+                        c.execute("""UPDATE digested_articles
+                                     SET digest=?, digest_status='done', digested_at=?
+                                     WHERE id=?""", (digest, now, rid))
+                        print(f"  [digest] ✓ {title[:70]}")
+                    else:
+                        c.execute("UPDATE digested_articles SET digest_status='failed' WHERE id=?", (rid,))
+                        print(f"  [digest] ✗ failed: {title[:70]}")
+                    c.commit(); c.close()
+
+                time.sleep(20)   # pace between articles — don't overload Ollama
+
+            except Exception as e:
+                print(f"  [digest] Worker error: {e}")
+                time.sleep(60)
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
 
 # ── Political figures to monitor for feed mentions ───────────────────────────
 # Updated March 2026 — all declared 2026 candidates for Bankura district ACs
@@ -636,23 +866,38 @@ def anthropic_response(text):
     }
 
 def _repair_json_py(text):
-    """Best-effort JSON extraction from raw LLM output (strips fences, finds outermost {})."""
+    """
+    Best-effort JSON extraction from raw LLM output.
+    Handles: markdown fences, preamble text before {, truncated JSON,
+    and the case where the model outputs prose instead of JSON.
+    """
     text = text.strip()
     # Strip markdown fences
     text = re.sub(r'^```(?:json)?\s*', '', text)
     text = re.sub(r'\s*```$', '', text)
     text = text.strip()
+    # Try direct parse first (happy path)
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    # Find the outermost {...}
+    # Find the FIRST '{' and treat everything from there as JSON
+    # This handles preamble text like "As an analyst, here is the JSON: {...}"
+    brace_pos = text.find('{')
+    if brace_pos > 0:
+        text = text[brace_pos:]
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+    # Use greedy regex to find outermost {...} block
     m = re.search(r'\{[\s\S]*\}', text)
     if m:
         try:
             return json.loads(m.group())
         except json.JSONDecodeError:
             pass
+    # Last resort: nothing parseable — return empty so fallback analysis is used
     return {}
 
 def merge_prebuilt_with_analysis(llm_result, pre_built):
@@ -715,20 +960,94 @@ def merge_prebuilt_with_analysis(llm_result, pre_built):
     return anthropic_response(json.dumps(full))
 
 def _score_severity(text):
-    """Pure Python severity scorer — no LLM needed."""
+    """
+    3-tier severity scorer.
+
+    HIGH   — physical violence that actually happened: deaths, bombs, booth capture,
+              abductions, firing, injuries during a clash or assault,
+              arrests of candidates/agents/workers at a polling location.
+    MEDIUM — MCC violations, EVM issues, political confrontation, 'clash' used
+              metaphorically (no injury words present), arms/cash/liquor seizures,
+              protest/tension, candidate list news, political analysis.
+    LOW    — routine political statements, rally announcements, opinion pieces,
+              candidate profiles, party strategy analysis.
+
+    Rules:
+      • 'clash' alone  → MEDIUM   (covers "Mamata's clash with ECI")
+      • 'clash' + physical injury words → HIGH   (covers "clash leaves 3 injured")
+      • 'arrested/detained' → HIGH only when at a polling booth / election-day context
+      • 'analysis/why/opinion/strategy' patterns → cap at MEDIUM even if other words present
+    """
     t = text.lower()
-    if any(k in t for k in [
-        "killed","murder","bomb","crude bomb","firing","shot dead",
-        "booth capture","abduct","assault","riot","arson","loot",
-        "detained","arrested","clash","attack","stone pelting","hurt","injured"
-    ]):
+
+    # ── Cap analysis/opinion at MEDIUM regardless of other keywords ──────────
+    _ANALYSIS_PATTERNS = [
+        "why ", " sees advantage", " strategy", "political analysis",
+        "opinion:", "analysis:", "explainer", " explained", "here's why",
+        "what it means", "sees benefit", "mamata's strategy", "bjp strategy",
+        "tmc strategy",
+    ]
+    is_analysis = any(p in t for p in _ANALYSIS_PATTERNS)
+
+    # ── Definite HIGH: physical violence, no context needed ──────────────────
+    # NOTE: bare "bullet" removed — "bulletproof" contains it and is not violence.
+    # "shot dead/shot at/firing" already cover all genuine gunfire scenarios.
+    _DEFINITE_HIGH = [
+        "killed", "bomb", "crude bomb",
+        "firing", "shot dead", "shot at",
+        "booth capture", "booth looting",
+        "abduct", "kidnap",
+        "riot", "arson",
+        "stone pelting",
+    ]
+    if not is_analysis and any(k in t for k in _DEFINITE_HIGH):
         return "high"
-    if any(k in t for k in [
-        "mcc violation","complaint","seized","cash","liquor","arms",
-        "tension","confrontation","blocked","stopped","protest",
-        "evm","vvpat","malfunction","tamper","threat","intimidat"
-    ]):
+
+    # ── "murder" only HIGH for current election violence ─────────────────────
+    # Historical crime references (RG Kar case, past murder cases) should not
+    # inflate the threat level — they are MEDIUM at most.
+    _MURDER_HISTORICAL = [
+        "murder victim", "rape-murder", "murder case", "murder accused",
+        "murder probe", "murder convict", "murder suspect", "murder trial",
+        "murder of", "who was murdered",
+    ]
+    if not is_analysis and "murder" in t:
+        if not any(p in t for p in _MURDER_HISTORICAL):
+            return "high"
+        # else: historical reference — fall through to MEDIUM
+
+    # ── Conditional HIGH: 'clash/attack/assault/loot' only if injury words present ──
+    _PHYSICAL_INJURY = ["injur", "hurt", "wound", "hospitalised", "dead", "died", "bleed"]
+    _CONDITIONAL_HIGH_TRIGGER = ["clash", "attack", "assault", "loot"]
+    has_injury = any(k in t for k in _PHYSICAL_INJURY)
+    if not is_analysis and has_injury and any(k in t for k in _CONDITIONAL_HIGH_TRIGGER):
+        return "high"
+
+    # ── Conditional HIGH: arrests only if election-day / booth-specific context ──
+    _ARREST_CONTEXT = [
+        "during polling", "on polling day", "election day",
+        "at booth", "polling booth", "at polling",
+        "candidate arrested", "agent arrested", "worker arrested",
+        "poll worker", "presiding officer",
+    ]
+    if not is_analysis and any(k in t for k in ["arrested", "detained"]):
+        if any(ctx in t for ctx in _ARREST_CONTEXT):
+            return "high"
+
+    # ── MEDIUM: everything below clear violence but above routine news ───────
+    _MEDIUM_KW = [
+        "mcc violation", "model code violation",
+        "seized", "cash seized", "liquor seized", "arms seized", "illegal cash",
+        "tension", "clash", "confrontation", "blocked", "stopped",
+        "evm", "vvpat", "malfunction", "tamper",
+        "threat", "intimidat",
+        "protest", "agitation", "arrested", "detained",   # general arrest = medium
+        "complaint", "allegation", "violation",
+        "second list", "candidate list", "announces list",  # candidate news = medium
+    ]
+    if any(k in t for k in _MEDIUM_KW):
         return "medium"
+
     return "low"
 
 def _topic_counts(panel_items):
@@ -759,12 +1078,26 @@ def _topic_counts(panel_items):
     ]
 
 def _threat_level(violence_count, mcc_count, high_items):
-    """Compute threat level from article signals."""
-    if violence_count >= 4 or high_items >= 5:
+    """
+    Compute threat level from WB-filtered article signals.
+
+    Thresholds raised vs previous version because:
+    - violence_keywords now covers ONLY physical incidents (not 'clash/arrested')
+    - high_items comes from a tighter _score_severity() that no longer marks
+      analysis pieces or non-WB arrests as HIGH
+    - Input is WB-geo-filtered so national noise is excluded
+
+    Scale:
+      CRITICAL  — multiple confirmed violent incidents; serious pre-poll breakdown
+      HIGH      — confirmed violence or several high-severity MCC/EVM incidents
+      MODERATE  — single violence report OR several MCC/liquor/cash seizure reports
+      LOW       — routine pre-election activity, no confirmed violence
+    """
+    if violence_count >= 4 or high_items >= 7:
         return "CRITICAL"
-    if violence_count >= 2 or high_items >= 3:
+    if violence_count >= 2 or high_items >= 4:
         return "HIGH"
-    if violence_count >= 1 or mcc_count >= 2 or high_items >= 1:
+    if violence_count >= 1 or mcc_count >= 3 or high_items >= 2:
         return "MODERATE"
     return "LOW"
 
@@ -801,15 +1134,17 @@ def inject_news_into_payload(payload_dict):
 
     # ── Stage 1: Pure Python scoring, classification & array building ────────
 
-    # Election relevance filter — keeps only items with at least one election keyword
-    # Applied to statewide panel to strip general/non-election news
+    # ── Filter 1: Election relevance ─────────────────────────────────────────
+    # Items must mention at least one election keyword to pass.
+    # NOTE: bare "seize/arrest/clash" removed — too broad, catches non-WB national news.
+    # Those words remain valid for severity scoring AFTER geographic check passes.
     _ELECTION_KW = [
         "election", "vote", "voting", "voter", "electi", "candidate", "constituency",
         "assembly", "mcc", "model code", "booth", "evm", "vvpat", "ballot",
         "polling", "poll station", "phase 1", "phase1",
         "tmc", "trinamool", "bjp", "congress", "cpim", "cpi(m)", "left front",
         "mamata", "campaign", "rally", "nomination", "manifesto",
-        "violence", "clash", "arrest", "detain", "seize", "paramilitary", "crpf", "bsf",
+        "paramilitary", "crpf", "bsf",
         "eci", "election commission", "ceo west bengal", "returning officer",
         "bankura", "purulia", "jhargram", "birbhum", "bardhaman", "medinipur",
         "bishnupur", "saltora", "chhatna", "ranibandh", "taldangra", "barjora", "onda",
@@ -819,26 +1154,80 @@ def inject_news_into_payload(payload_dict):
         text = (item.get("title", "") + " " + item.get("desc", "")).lower()
         return any(kw in text for kw in _ELECTION_KW)
 
-    statewide_raw    = [it for it in panel_items.get("statewide", []) if _is_election_relevant(it)]
-    filtered_out     = len(panel_items.get("statewide", [])) - len(statewide_raw)
-    if filtered_out:
-        print(f"  Statewide filter: dropped {filtered_out} non-election article(s)")
+    # ── Filter 2: West Bengal geographic relevance ────────────────────────────
+    # Statewide panel (and violence counting) must be anchored to WB/Bengal.
+    # This drops Delhi gun seizures, UP/Bihar/MP election news, etc.
+    # News from OTHER poll-bound states is dropped unless it has direct WB bearing.
+    _WB_GEO_KW = [
+        "west bengal", "bengal", "wb ",
+        "bankura", "purulia", "jhargram", "birbhum", "bardhaman", "burdwan",
+        "medinipur", "howrah", "hooghly", "kolkata", "calcutta",
+        "murshidabad", "malda", "nadia", "cooch behar", "darjeeling", "jalpaiguri",
+        "north 24", "south 24", "24 pargana",
+        "bishnupur", "saltora", "chhatna", "ranibandh", "taldangra", "barjora",
+        "onda", "kotulpur", "sonamukhi", "indas", "raipur",
+        "mamata", "trinamool", "tmc", "wb election", "wb 2026",
+        "ceo west bengal", "bengal election",
+    ]
+    def _is_wb_relevant(item):
+        text = (item.get("title", "") + " " + item.get("desc", "")).lower()
+        return any(kw in text for kw in _WB_GEO_KW)
+
+    # Statewide: election-relevant AND WB-geographic
+    statewide_raw = [
+        it for it in panel_items.get("statewide", [])
+        if _is_election_relevant(it) and _is_wb_relevant(it)
+    ]
+    # Alerts: Google News RSS for violence/arms/MCC often pulls national crime news.
+    # Apply WB geo-filter so Delhi/UP/Bihar seizures never appear in alerts panel.
+    alerts_raw = [
+        it for it in panel_items.get("alerts", [])
+        if _is_wb_relevant(it)
+    ]
+    # Parties: BJP/TMC press-release feeds also pull national party news.
+    # Filter to WB-relevant items (mentions Bengal/Mamata/TMC/district names).
+    parties_raw = [
+        it for it in panel_items.get("parties", [])
+        if _is_wb_relevant(it)
+    ]
+    # Bankura, surrounds, official, bangla: sourced from WB-specific feeds — no filter needed.
+
+    # Log how much was dropped across all filtered panels
+    sw_dropped = len(panel_items.get("statewide", [])) - len(statewide_raw)
+    al_dropped = len(panel_items.get("alerts",    [])) - len(alerts_raw)
+    pa_dropped = len(panel_items.get("parties",   [])) - len(parties_raw)
+    total_dropped = sw_dropped + al_dropped + pa_dropped
+    if total_dropped:
+        print(f"  Geo-filter: dropped {total_dropped} non-WB article(s) "
+              f"[statewide:{sw_dropped} alerts:{al_dropped} parties:{pa_dropped}]")
 
     bankura_panel   = _build_panel_json(panel_items.get("bankura",   []))
     surrounds_panel = _build_panel_json(panel_items.get("surrounds", []))
     statewide_panel = _build_panel_json(statewide_raw)
-    parties_panel   = _build_panel_json(panel_items.get("parties",   []))
-    alerts_panel    = _build_panel_json(panel_items.get("alerts",    []))
+    parties_panel   = _build_panel_json(parties_raw)
+    alerts_panel    = _build_panel_json(alerts_raw)
     official_panel  = _build_panel_json(panel_items.get("official",  []))
     bangla_panel    = _build_panel_json(panel_items.get("bangla",    []))
 
     all_panels = (bankura_panel + surrounds_panel + statewide_panel +
                   parties_panel + alerts_panel + official_panel + bangla_panel)
 
-    violence_keywords = ["killed","murder","bomb","crude bomb","firing","shot","booth capture",
-                         "abduct","assault","riot","arson","loot","detained","clash","attack",
-                         "stone pelting","hurt","injured","arrested","violence"]
-    mcc_keywords      = ["mcc","model code","violation","seized","cash","liquor","arms","bribe"]
+    # ── Violence / MCC counting: WB-only items, tighter keyword list ─────────
+    # 'clash', 'arrested', 'detained' removed from violence keywords —
+    # they are too broad and inflate counts when national news leaks through.
+    # Only actual physical violence events count toward threat level.
+    violence_keywords = [
+        "killed", "murder", "bomb", "crude bomb", "firing", "shot dead", "shot at",
+        "booth capture", "booth looting",
+        "abduct", "kidnap",
+        "assault", "riot", "arson", "loot",
+        "stone pelting", "injured", "hurt", "violence",
+    ]
+    mcc_keywords = [
+        "mcc violation", "model code violation",
+        "liquor seized", "cash seized", "arms seized", "illegal cash",
+        "bribe", "inducement",
+    ]
 
     def kw_count(items, kws):
         n = 0
@@ -848,13 +1237,14 @@ def inject_news_into_payload(payload_dict):
                 n += 1
         return n
 
-    all_raw = (panel_items.get("bankura",[]) + panel_items.get("surrounds",[]) +
-               panel_items.get("statewide",[]) + panel_items.get("parties",[]) +
-               panel_items.get("alerts",[]) + panel_items.get("official",[]) +
-               panel_items.get("bangla",[]))
+    # Violence and MCC counts use ONLY geo-filtered items.
+    # alerts_raw and parties_raw are now WB-filtered (Delhi/national items removed).
+    wb_raw = (panel_items.get("bankura",[]) + panel_items.get("surrounds",[]) +
+              statewide_raw + alerts_raw + parties_raw +
+              panel_items.get("official",[]) + panel_items.get("bangla",[]))
 
-    violence_count = kw_count(all_raw, violence_keywords)
-    mcc_count      = kw_count(all_raw, mcc_keywords)
+    violence_count = kw_count(wb_raw, violence_keywords)
+    mcc_count      = kw_count(wb_raw, mcc_keywords)
     high_items     = sum(1 for it in all_panels if it["severity"] == "high")
     threat_level   = _threat_level(violence_count, mcc_count, high_items)
     topic_counts   = _topic_counts(panel_items)
@@ -889,10 +1279,12 @@ def inject_news_into_payload(payload_dict):
     }
 
     # ── Scan all items for political figure mentions ─────────────────────────
+    # Use all WB-relevant items + parties panel (party statements mention candidates)
+    figure_scan_items = wb_raw + panel_items.get("parties", [])
     figure_mentions = []
     for fig in POLITICAL_FIGURES:
         matches = []
-        for it in all_raw:
+        for it in figure_scan_items:
             text = (it.get("title","") + " " + it.get("desc","")).lower()
             if any(kw in text for kw in fig["keywords"]):
                 matches.append({
@@ -911,6 +1303,9 @@ def inject_news_into_payload(payload_dict):
     mentioned = sum(1 for f in figure_mentions if f["count"] > 0)
     print(f"  Figure monitor: {mentioned}/{len(POLITICAL_FIGURES)} figures mentioned in feeds")
     pre_built["figureMentions"] = figure_mentions
+
+    # ── Phase 2: queue new MED/HIGH articles for background digesting ──────────
+    _save_digest_candidates(panel_items)
 
     # Stash for do_POST() to merge after LLM returns
     payload_dict["_pre_built"] = pre_built
@@ -950,7 +1345,10 @@ def inject_news_into_payload(payload_dict):
         f"You are an election intelligence analyst briefing an official observer in Bankura district, "
         f"West Bengal. Phase 1 election date: 23 April 2026. Current time: {ts}.\n"
         f"You understand Bengali. Translate any Bengali headlines to English accurately.\n"
-        f"Output ONLY raw JSON — no markdown, no explanation. Start with {{ end with }}.\n"
+        f"CRITICAL INSTRUCTION: Respond with ONLY a raw JSON object. "
+        f"Do NOT write any introduction, preamble, disclaimer, acknowledgement, or explanation. "
+        f"Do NOT say 'Here is', 'As an analyst', 'I will', 'Based on', or anything similar. "
+        f"Your ENTIRE response must be valid JSON starting with {{ and ending with }}. "
         f"Required format:\n"
         f'{{"analysis":{{"headline":"","bankuraSituation":"","surroundingSituation":"",'
         f'"partyPositions":"","keyRisks":["","",""],"observerActions":["","",""],'
@@ -975,7 +1373,7 @@ def inject_news_into_payload(payload_dict):
         f"If a headline mixes English and Bengali, still output the full meaning in plain English only. "
         f"bangla_translations[0] = English meaning of item 0, [1] = item 1, etc. "
         f"If no Bengali items return [].\n\n"
-        f"Output ONLY the JSON object. No preamble."
+        f"YOUR RESPONSE MUST START WITH {{ — output the JSON object now:"
     )
 
     total_chars = len(system_prompt) + len(user_prompt)
@@ -1045,13 +1443,64 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(content)
         elif path == "/social-links":
-            # Return social media monitoring links for dashboard sidebar
             body = json.dumps(SOCIAL_MONITOR_LINKS).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
-            self._cors()
-            self.end_headers()
+            self._cors(); self.end_headers()
             self.wfile.write(body)
+
+        elif path == "/api/digests":
+            # GET /api/digests?days=7&sev=all|high|medium&status=all|done|pending
+            if not FEATURE_SQLITE:
+                body = json.dumps({"articles":[],"stats":{}}).encode()
+            else:
+                qs     = parse_qs(self.path.split("?",1)[1]) if "?" in self.path else {}
+                days   = int(qs.get("days",  ["7"])[0])
+                sev    = qs.get("sev",    ["all"])[0]
+                status = qs.get("status", ["all"])[0]
+                cutoff = datetime.fromtimestamp(
+                    datetime.now(timezone.utc).timestamp() - days * 86400,
+                    tz=timezone.utc
+                ).isoformat()
+                with _db_lock:
+                    c = _db_conn()
+                    where  = ["first_seen >= ?"];  args = [cutoff]
+                    if sev    != "all": where.append("severity=?");      args.append(sev)
+                    if status != "all": where.append("digest_status=?"); args.append(status)
+                    sql = ("SELECT id,url,title,source,severity,panel,"
+                           "published_at,first_seen,digest,digest_status,digested_at "
+                           "FROM digested_articles WHERE " + " AND ".join(where) +
+                           " ORDER BY CASE severity WHEN 'high' THEN 1 ELSE 2 END,"
+                           " CASE panel WHEN 'bankura' THEN 1 WHEN 'alerts' THEN 2"
+                           "            WHEN 'surrounds' THEN 3 ELSE 4 END,"
+                           " first_seen DESC LIMIT 300")
+                    rows   = [dict(r) for r in c.execute(sql, args).fetchall()]
+                    stats  = dict(c.execute("""
+                        SELECT digest_status, COUNT(*) as n
+                        FROM digested_articles WHERE first_seen >= ?
+                        GROUP BY digest_status
+                    """, [cutoff]).fetchall() or [])
+                    c.close()
+                body = json.dumps({"articles": rows, "stats": stats}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self._cors(); self.end_headers()
+            self.wfile.write(body)
+
+        elif path == "/api/digest/redigest":
+            # POST-like GET: /api/digest/redigest?id=N  — re-queue a failed/done article
+            if FEATURE_SQLITE and "?" in self.path:
+                aid = int(parse_qs(self.path.split("?",1)[1]).get("id",["0"])[0])
+                if aid:
+                    with _db_lock:
+                        c = _db_conn()
+                        c.execute("UPDATE digested_articles SET digest_status='pending' WHERE id=?", (aid,))
+                        c.commit(); c.close()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self._cors(); self.end_headers()
+            self.wfile.write(b'{"ok":true}')
+
         else:
             self.send_error(404)
 
@@ -1331,6 +1780,10 @@ def main():
     print(f"  OSINT     :  http://localhost:{port}/osint")
     print(f"\n  News source: Live RSS feeds (Google News, no API key needed)")
     print(f"\n  Press Ctrl+C to stop\n")
+
+    # ── Phase 2: init SQLite DB and start background digest worker ───────────
+    _db_init()
+    _start_digest_worker(ollama_base=f"http://localhost:11434", model=model)
 
     server = QuietHTTPServer(("127.0.0.1", port), Handler)
 

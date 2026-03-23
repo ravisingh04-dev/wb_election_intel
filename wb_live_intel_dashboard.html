@@ -17,6 +17,14 @@
   --purple:#7c3aed;--teal:#0891b2;
   --text:#0f172a;--text2:#334155;--text3:#64748b;
   --card-bg:#ffffff;
+  --shadow:rgba(0,0,0,0.06);
+}
+/* ── DARK MODE ── */
+[data-theme="dark"]{
+  --bg:#0f172a;--bg2:#1e293b;--bg3:#162032;--bg4:#1e2d47;
+  --border:#334155;--border2:#475569;
+  --text:#f1f5f9;--text2:#cbd5e1;--text3:#94a3b8;
+  --card-bg:#1e293b;--shadow:rgba(0,0,0,0.35);
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;font-size:14px;line-height:1.6;min-height:100vh}
@@ -68,6 +76,97 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 .alert-banner{display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:10px 16px;font-size:13px;color:var(--red2);align-items:center;gap:10px}
 .alert-banner.show{display:flex}
 .alert-icon{font-size:16px}
+
+/* NOTIFICATION SIDEBAR CARD */
+.notif-status{font-size:10px;font-family:'JetBrains Mono',monospace;padding:2px 7px;border-radius:10px;display:inline-block;vertical-align:middle;margin-left:4px}
+.notif-status.on{background:rgba(22,163,74,0.15);color:var(--green2)}
+.notif-status.off{background:rgba(100,116,139,0.12);color:var(--text3)}
+.notif-status.blocked{background:rgba(220,38,38,0.1);color:var(--red2)}
+
+/* TREND SPARKLINE PANEL */
+.trend-panel{background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:14px}
+.trend-header{padding:10px 14px;border-bottom:1px solid var(--border);background:var(--bg3);display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600}
+.trend-meta{margin-left:auto;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)}
+.trend-chart-wrap{padding:10px 14px 4px;height:110px}
+.trend-legend{display:flex;gap:16px;padding:4px 14px 10px;font-size:11px;color:var(--text3);flex-wrap:wrap}
+.trend-legend span{display:flex;align-items:center;gap:5px}
+.trend-l-low::before,.trend-l-mod::before,.trend-l-high::before,.trend-l-alert::before,.trend-l-viol::before{content:'';width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:2px}
+.trend-l-low::before{background:var(--green)}.trend-l-mod::before{background:var(--amber)}
+.trend-l-high::before{background:var(--red)}.trend-l-alert::before{background:#d97706;border-radius:2px}
+.trend-l-viol::before{background:#dc2626;border-radius:2px}
+
+/* THEME TOGGLE BUTTON */
+.theme-toggle{background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);
+  color:#fff;border-radius:20px;padding:4px 10px;font-size:12px;cursor:pointer;
+  display:flex;align-items:center;gap:5px;font-family:'JetBrains Mono',monospace}
+.theme-toggle:hover{background:rgba(255,255,255,0.25)}
+
+/* DIGEST SIDEBAR BADGE */
+.digest-badge{background:var(--red);color:#fff;font-size:10px;font-family:'JetBrains Mono',monospace;
+  padding:1px 6px;border-radius:10px;margin-left:4px;display:none}
+.digest-badge.show{display:inline-block}
+
+/* DIGEST MODAL */
+.digest-modal-wrap{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);
+  z-index:500;align-items:flex-start;justify-content:center;padding:24px 16px;overflow-y:auto}
+.digest-modal-wrap.open{display:flex}
+.digest-modal{background:var(--bg2);border:1px solid var(--border);border-radius:14px;
+  width:100%;max-width:860px;max-height:88vh;display:flex;flex-direction:column;
+  box-shadow:0 20px 60px var(--shadow)}
+.dm-header{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;
+  align-items:center;gap:10px;flex-wrap:wrap;background:var(--bg3);border-radius:14px 14px 0 0}
+.dm-title{font-size:15px;font-weight:600;flex:1}
+.dm-filter{padding:4px 10px;border-radius:6px;border:1px solid var(--border2);
+  background:var(--bg);color:var(--text);font-size:12px;cursor:pointer}
+.dm-btn{padding:5px 12px;border-radius:6px;border:1px solid var(--border2);
+  background:var(--bg4);color:var(--text2);font-size:12px;cursor:pointer;white-space:nowrap}
+.dm-btn:hover{border-color:var(--accent);color:var(--accent)}
+.dm-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.dm-close{background:none;border:none;font-size:18px;cursor:pointer;color:var(--text3);
+  padding:2px 6px;border-radius:4px}
+.dm-close:hover{background:var(--bg4);color:var(--text)}
+.dm-stats{padding:8px 20px;border-bottom:1px solid var(--border);font-size:11px;
+  font-family:'JetBrains Mono',monospace;color:var(--text3);display:flex;gap:16px;flex-wrap:wrap}
+.dm-stat-pill{background:var(--bg3);padding:2px 8px;border-radius:10px;border:1px solid var(--border)}
+.dm-stat-pill.done{border-color:rgba(22,163,74,0.4);color:var(--green)}
+.dm-stat-pill.pending{border-color:rgba(217,119,6,0.4);color:var(--amber)}
+.dm-stat-pill.high{border-color:rgba(220,38,38,0.4);color:var(--red2)}
+.dm-body{overflow-y:auto;padding:14px 20px;display:flex;flex-direction:column;gap:10px;flex:1}
+/* Digest article card */
+.da-card{border:1px solid var(--border);border-radius:10px;padding:12px 14px;
+  background:var(--card-bg);transition:border-color .15s}
+.da-card.da-high{border-left:3px solid var(--red)}
+.da-card.da-medium{border-left:3px solid var(--amber)}
+.da-card.da-read{opacity:0.55}
+.da-card:hover{border-color:var(--border2)}
+.da-row1{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:5px}
+.da-sev{font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace;padding:2px 7px;
+  border-radius:10px}
+.da-sev-high{background:rgba(220,38,38,0.12);color:var(--red2)}
+.da-sev-med{background:rgba(217,119,6,0.12);color:var(--amber2)}
+.da-panel{font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3);
+  background:var(--bg3);padding:2px 7px;border-radius:10px;border:1px solid var(--border)}
+.da-source{font-size:11px;color:var(--text3)}
+.da-time{font-size:10px;color:var(--text3);margin-left:auto;font-family:'JetBrains Mono',monospace}
+.da-title{font-size:13px;font-weight:500;color:var(--text);margin-bottom:6px;line-height:1.45}
+.da-title a{color:var(--text);text-decoration:none}
+.da-title a:hover{color:var(--accent);text-decoration:underline}
+.da-digest{font-size:12.5px;color:var(--text2);line-height:1.65;border-left:2px solid var(--border2);
+  padding-left:10px;margin-top:4px}
+.da-pending{font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--amber);
+  margin-top:4px;display:flex;align-items:center;gap:6px}
+.da-failed{font-size:11px;color:var(--text3);margin-top:4px}
+.da-actions{display:flex;gap:6px;margin-top:8px}
+.da-act-btn{font-size:11px;padding:3px 10px;border-radius:5px;border:1px solid var(--border);
+  background:transparent;color:var(--text3);cursor:pointer}
+.da-act-btn:hover{border-color:var(--accent);color:var(--accent)}
+/* Night brief reading mode */
+.dm-nightmode .da-card{border:none;border-bottom:1px solid var(--border);border-radius:0;
+  padding:16px 0}
+.dm-nightmode .da-digest{font-size:14px;line-height:1.8;border-left:none;padding-left:0}
+.dm-nightmode .da-actions,.dm-nightmode .da-row1{display:none}
+.dm-nightmode .da-title{font-size:14px;font-weight:600;margin-bottom:8px}
+.dm-empty{padding:40px;text-align:center;color:var(--text3);font-size:13px}
 
 /* METRICS ROW */
 .metrics-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
@@ -272,6 +371,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
     <div class="sep"></div>
     <div class="next-refresh" id="nextRefreshDisplay">Next: --:--</div>
     <div class="mode-badge mode-normal" id="modeBadge" onclick="toggleMode()">NORMAL MODE</div>
+    <button class="theme-toggle" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle dark/light mode">☀️ Light</button>
     <div class="clock-display" id="clock"></div>
   </div>
 </div>
@@ -386,6 +486,35 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
       </div>
     </div>
 
+    <!-- ARTICLE DIGEST -->
+    <div class="sidebar-section">
+      <div class="sid-label">Article Digest</div>
+      <button class="ctrl-btn" onclick="openDigest()">
+        <span class="btn-icon">📚</span> Night reading
+        <span class="digest-badge" id="digestUnreadBadge">0</span>
+      </button>
+      <div class="stat-mini">
+        <div class="stat-mini-val" id="digestDoneCount" style="color:var(--green)">—</div>
+        <div class="stat-mini-lbl">Articles digested · 7 days</div>
+      </div>
+      <div class="stat-mini" style="margin-top:4px">
+        <div class="stat-mini-val" id="digestPendingCount" style="color:var(--amber);font-size:16px">—</div>
+        <div class="stat-mini-lbl">Queued · processing</div>
+      </div>
+    </div>
+
+    <!-- PUSH ALERT NOTIFICATIONS -->
+    <div class="sidebar-section" id="notifSection">
+      <div class="sid-label">Push alerts <span class="notif-status off" id="notifStatusBadge">OFF</span></div>
+      <button class="ctrl-btn" id="notifToggleBtn" onclick="toggleNotifications()">
+        <span class="btn-icon">🔔</span> Enable push alerts
+      </button>
+      <div class="stat-mini">
+        <div class="stat-mini-val" id="notifFiredCount" style="color:var(--amber)">0</div>
+        <div class="stat-mini-lbl">Critical alerts · this session</div>
+      </div>
+    </div>
+
     <div class="sidebar-section">
       <div id="connMode" style="font-size:10px;padding:5px 8px;border-radius:6px;font-family:'JetBrains Mono',monospace"></div>
     </div>
@@ -457,6 +586,25 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
       </div>
     </div>
 
+    <!-- THREAT & SENTIMENT TREND SPARKLINE (hidden until first cycle completes) -->
+    <div class="trend-panel" id="trendPanel" style="display:none">
+      <div class="trend-header">
+        <span>📈</span>
+        <span>Threat &amp; Signal Trend</span>
+        <span class="trend-meta" id="trendMeta">0 cycles stored</span>
+      </div>
+      <div class="trend-chart-wrap">
+        <canvas id="trendCanvas"></canvas>
+      </div>
+      <div class="trend-legend">
+        <span class="trend-l-low">Low threat</span>
+        <span class="trend-l-mod">Moderate</span>
+        <span class="trend-l-high">High / Critical</span>
+        <span class="trend-l-alert">High alerts (dashed)</span>
+        <span class="trend-l-viol">Violence reports (dotted)</span>
+      </div>
+    </div>
+
     <!-- FEEDS GRID -->
     <div class="feeds-grid">
       <div class="feed-panel" id="feedBankura">
@@ -525,6 +673,33 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
   
 <!-- TIMELINE MODAL -->
+<!-- ══════════════════ ARTICLE DIGEST MODAL ══════════════════ -->
+<div class="digest-modal-wrap" id="digestModal" onclick="if(event.target===this)closeDigest()">
+  <div class="digest-modal">
+    <div class="dm-header">
+      <span style="font-size:16px">📚</span>
+      <span class="dm-title">Article Digest — MED/HIGH Priority</span>
+      <select class="dm-filter" id="dmDaysFilter" onchange="loadDigests()">
+        <option value="1">Today</option>
+        <option value="2">Last 2 days</option>
+        <option value="7" selected>Last 7 days</option>
+        <option value="30">Last 30 days</option>
+      </select>
+      <select class="dm-filter" id="dmSevFilter" onchange="loadDigests()">
+        <option value="all">All severity</option>
+        <option value="high">HIGH only</option>
+        <option value="medium">MED only</option>
+      </select>
+      <button class="dm-btn" id="dmNightBtn" onclick="toggleNightMode()">🌙 Night brief</button>
+      <button class="dm-btn" onclick="exportDigests()">⬇ Export .txt</button>
+      <button class="dm-btn" onclick="markAllRead()">✓ Mark all read</button>
+      <button class="dm-close" onclick="closeDigest()">✕</button>
+    </div>
+    <div class="dm-stats" id="dmStats">Loading…</div>
+    <div class="dm-body" id="dmBody"><div class="dm-empty">Loading digests…</div></div>
+  </div>
+</div>
+
 <div id="tlModal" class="tl-modal-overlay" style="display:none" onclick="if(event.target===this)closeTl()">
   <div class="tl-modal">
     <div class="tl-modal-header">
@@ -599,6 +774,13 @@ var progressDuration = REFRESH_NORMAL;
 var chartThreat = null, chartTopics = null;
 var threatHistory = [], topicHistory = [];
 var currentParsed = null;  // stores last fetch result for chip expansion
+
+/* ─── PHASE 1 FEATURE FLAGS ─────────────────────────────────────────────
+   Set to false to instantly disable a feature without any other code change.
+   Each feature is completely self-contained — disabling one never affects
+   the core fetch/analysis pipeline.                                        */
+var FEATURE_ALERTS          = true;   // browser push notifications for critical keywords
+var FEATURE_SENTIMENT_TREND = true;   // threat/signal trend sparkline above feeds grid
 
 /* ─── TOPIC CHIP EXPAND / COLLAPSE ─── */
 // Mirrors Python _topic_counts() keyword sets.
@@ -1042,6 +1224,10 @@ async function runFetch(manual){
     renderFigureMonitor(parsed.figureMentions);
     showContextImages(tl);
 
+    /* ── Phase 1 hooks ── */
+    if(FEATURE_ALERTS)          checkAlerts(parsed);
+    if(FEATURE_SENTIMENT_TREND){ saveTrendPoint(ts, parsed); renderTrendChart(); }
+
     document.getElementById('lastRunTime').textContent = ts;
     currentParsed = parsed;
     pushCycle(ts, parsed);
@@ -1063,6 +1249,256 @@ async function runFetch(manual){
     scheduleNext();
   }
 }
+
+/* ═══════ PHASE 1A — PUSH ALERT NOTIFICATIONS ═══════ */
+
+var _notifEnabled    = false;
+var _notifFiredCount = 0;
+var _alertedKeys     = new Set();  // dedup so same keyword doesn't fire every 30 min
+
+/* Keywords that trigger a browser push notification.
+   Each entry: key (unique dedup id), words (any of these in feed text triggers),
+   label (shown in notification body).                                          */
+var ALERT_KEYWORDS = [
+  {key:'booth',     words:['booth capture','booth jamming','booth looting','booth agent beaten'],
+                    label:'Booth capture / jamming'},
+  {key:'violence',  words:['violence','violent clash','bomb hurled','bombing','firing','gunshot',
+                            'stabbing','stabbed','attacked candidate','worker attacked'],
+                    label:'Election violence reported'},
+  {key:'arrest',    words:['arrested','detained','custody','in custody'],
+                    label:'Candidate / worker arrested'},
+  {key:'fir',       words:['fir filed','fir lodged','case filed','complaint filed'],
+                    label:'FIR / case filed'},
+  {key:'mcc',       words:['model code violation','mcc violation','mcc notice',
+                            'election commission notice','ec notice'],
+                    label:'MCC violation / EC notice'},
+  {key:'evm',       words:['evm tamper','evm seized','evm issue','vvpat problem','vvpat mismatch'],
+                    label:'EVM / VVPAT issue'},
+  {key:'sec144',    words:['section 144','prohibitory order','curfew imposed'],
+                    label:'Section 144 / prohibitory order'},
+  {key:'repoll',    words:['re-poll','repoll','re-election order','countermand'],
+                    label:'Re-poll ordered'},
+  {key:'forces',    words:['crpf deployed','central force deployed','bsf deployed',
+                            'paramilitary deployed','rapid action force'],
+                    label:'Central forces deployed'},
+  {key:'candidacy', words:['nomination rejected','nomination cancelled','candidate disqualified',
+                            'candidate withdrawal','withdrew nomination'],
+                    label:'Nomination issue / candidate withdrawal'},
+];
+
+function _notifBtnUpdate(){
+  var btn   = document.getElementById('notifToggleBtn');
+  var badge = document.getElementById('notifStatusBadge');
+  if(!btn || !badge) return;
+  var perm = (typeof Notification !== 'undefined') ? Notification.permission : 'unsupported';
+  if(perm === 'unsupported'){
+    btn.innerHTML = '<span class="btn-icon">🔕</span> Not supported'; btn.disabled = true;
+    badge.textContent = 'N/A'; badge.className = 'notif-status blocked';
+  } else if(perm === 'denied'){
+    btn.innerHTML = '<span class="btn-icon">🔕</span> Blocked by browser'; btn.disabled = true;
+    badge.textContent = 'BLOCKED'; badge.className = 'notif-status blocked';
+  } else if(_notifEnabled && perm === 'granted'){
+    btn.innerHTML = '<span class="btn-icon">🔕</span> Disable alerts';
+    badge.textContent = 'ON'; badge.className = 'notif-status on';
+  } else {
+    btn.innerHTML = '<span class="btn-icon">🔔</span> Enable push alerts';
+    badge.textContent = 'OFF'; badge.className = 'notif-status off';
+  }
+}
+
+function toggleNotifications(){
+  if(typeof Notification === 'undefined'){ alert('Browser notifications not supported.'); return; }
+  if(Notification.permission === 'denied'){
+    alert('Notifications are blocked for this page.\n\nTo enable:\n• Chrome/Edge: click the 🔒 lock icon in the address bar → Notifications → Allow\n• Safari: Safari menu → Settings for this website → Notifications → Allow');
+    return;
+  }
+  if(!_notifEnabled){
+    Notification.requestPermission().then(function(result){
+      if(result === 'granted'){
+        _notifEnabled = true;
+        new Notification('WB Election Intel — Alerts active', {
+          body: 'You will receive push notifications for booth capture, MCC violations, arrests, violence, and other critical election events — even when this tab is in the background.',
+          tag:  'wb-election-init'
+        });
+      }
+      _notifBtnUpdate();
+    });
+  } else {
+    _notifEnabled = false;
+    _notifBtnUpdate();
+  }
+}
+
+function checkAlerts(parsed){
+  if(!FEATURE_ALERTS || !_notifEnabled) return;
+  if(typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+
+  /* Collect all text from every feed panel + analysis summary */
+  var texts = [];
+  ['bankura','surrounds','statewide','alerts','official','parties','bangla'].forEach(function(k){
+    (parsed[k]||[]).forEach(function(item){
+      texts.push((item.headline||'')+' '+(item.summary||''));
+    });
+  });
+  texts.push(JSON.stringify(parsed.analysis||{}));
+  var full = texts.join(' ').toLowerCase();
+
+  /* Match against keyword config */
+  var fired = [];
+  ALERT_KEYWORDS.forEach(function(def){
+    if(_alertedKeys.has(def.key)) return;
+    if(def.words.some(function(w){ return full.includes(w.toLowerCase()); })){
+      fired.push(def); _alertedKeys.add(def.key);
+    }
+  });
+
+  /* Always alert on HIGH / CRITICAL threat level */
+  var tl = ((parsed.metrics||{}).threatLevel||'LOW').toUpperCase();
+  if((tl==='HIGH'||tl==='CRITICAL') && !_alertedKeys.has('threat-level')){
+    fired.push({key:'threat-level', label:'Threat level is '+tl}); _alertedKeys.add('threat-level');
+  }
+
+  if(!fired.length) return;
+
+  _notifFiredCount += fired.length;
+  document.getElementById('notifFiredCount').textContent = _notifFiredCount;
+
+  var headline = (parsed.analysis||{}).headline || '';
+  var body     = fired.map(function(f){ return '▸ '+f.label; }).join('\n');
+  if(headline) body += '\n\n'+headline;
+
+  new Notification('⚠️ WB Election Intel — '+fired[0].label, {
+    body:               body,
+    tag:                'wb-election-alert',   /* collapses into one notification (no spam) */
+    requireInteraction: true                   /* stays on screen until dismissed */
+  });
+}
+
+/* Reset dedup set every 2 hours so same keyword can re-fire in a new session block */
+setInterval(function(){ _alertedKeys.clear(); }, 2 * 60 * 60 * 1000);
+
+/* Init button state on load; hide entire sidebar section if feature is off */
+document.addEventListener('DOMContentLoaded', function(){
+  if(!FEATURE_ALERTS){
+    var ns = document.getElementById('notifSection');
+    if(ns) ns.style.display = 'none';
+    return;   // no point updating button state if section is hidden
+  }
+  _notifBtnUpdate();
+});
+
+
+/* ═══════ PHASE 1B — THREAT & SIGNAL TREND SPARKLINE ═══════ */
+
+var TREND_KEY    = 'wb_election_intel_trend_2026';
+var _trendChart  = null;
+
+function _loadTrend(){ try{ return JSON.parse(localStorage.getItem(TREND_KEY)||'[]'); }catch(e){ return []; } }
+function _saveTrend(arr){ try{ if(arr.length>30) arr=arr.slice(-30); localStorage.setItem(TREND_KEY,JSON.stringify(arr)); }catch(e){} }
+
+function saveTrendPoint(ts, parsed){
+  if(!FEATURE_SENTIMENT_TREND) return;
+  var m = parsed.metrics || {};
+  var arr = _loadTrend();
+  arr.push({
+    ts:              ts,
+    iso:             new Date().toISOString(),
+    threatLevel:     (m.threatLevel||'LOW').toUpperCase(),
+    totalSignals:    m.totalSignals     || 0,
+    highAlerts:      m.highAlerts       || 0,
+    violenceReports: m.violenceReports  || 0,
+  });
+  _saveTrend(arr);
+}
+
+function renderTrendChart(){
+  if(!FEATURE_SENTIMENT_TREND) return;
+  var arr   = _loadTrend();
+  var panel = document.getElementById('trendPanel');
+  if(!panel) return;
+  if(!arr.length){ panel.style.display='none'; return; }
+  panel.style.display = '';
+
+  var meta = document.getElementById('trendMeta');
+  if(meta) meta.textContent = arr.length+' cycle'+(arr.length!==1?'s':'')+' stored';
+
+  var tlMap  = {LOW:1, MODERATE:2, HIGH:3, CRITICAL:4};
+  /* Shorten timestamps: "22 Mar, 09:30 am" → "09:30" */
+  var labels = arr.map(function(p){
+    var m = p.ts.match(/(\d+:\d+)/); return m ? m[1] : p.ts.slice(0,5);
+  });
+  var tlVals     = arr.map(function(p){ return tlMap[p.threatLevel]||1; });
+  var alertVals  = arr.map(function(p){ return p.highAlerts||0; });
+  var violVals   = arr.map(function(p){ return p.violenceReports||0; });
+  var ptColors   = arr.map(function(p){
+    return p.threatLevel==='CRITICAL'||p.threatLevel==='HIGH' ? '#dc2626'
+         : p.threatLevel==='MODERATE' ? '#d97706' : '#16a34a';
+  });
+
+  var canvas = document.getElementById('trendCanvas');
+  if(!canvas) return;
+
+  if(_trendChart){
+    _trendChart.data.labels                             = labels;
+    _trendChart.data.datasets[0].data                  = tlVals;
+    _trendChart.data.datasets[0].pointBackgroundColor  = ptColors;
+    _trendChart.data.datasets[1].data                  = alertVals;
+    _trendChart.data.datasets[2].data                  = violVals;
+    _trendChart.update('none');
+    return;
+  }
+
+  _trendChart = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [
+        { label:'Threat level',    data:tlVals,    yAxisID:'yT',
+          borderColor:'#2563eb',   backgroundColor:'rgba(37,99,235,0.07)',
+          pointBackgroundColor:ptColors, pointRadius:5, pointHoverRadius:7,
+          tension:0.35, fill:true },
+        { label:'High alerts',     data:alertVals, yAxisID:'yC',
+          borderColor:'#d97706',   backgroundColor:'transparent',
+          pointRadius:3, tension:0.35, borderDash:[5,3] },
+        { label:'Violence reports',data:violVals,  yAxisID:'yC',
+          borderColor:'#dc2626',   backgroundColor:'transparent',
+          pointRadius:3, tension:0.35, borderDash:[2,3] },
+      ]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:false,
+      plugins:{
+        legend:{display:false},
+        tooltip:{
+          callbacks:{
+            title:function(c){ return c[0].label; },
+            label:function(c){
+              if(c.datasetIndex===0){ return 'Threat: '+(['','LOW','MODERATE','HIGH','CRITICAL'][c.raw]||c.raw); }
+              return c.dataset.label+': '+c.raw;
+            }
+          }
+        }
+      },
+      scales:{
+        x:{ ticks:{maxTicksLimit:8,font:{size:9},color:'#64748b',maxRotation:0},
+            grid:{color:'rgba(100,116,139,0.08)'} },
+        yT:{ type:'linear', position:'left',  min:0, max:5,
+             ticks:{stepSize:1,font:{size:9},color:'#64748b',
+                    callback:function(v){ return ['','L','M','H','C',''][v]||''; }},
+             grid:{color:'rgba(100,116,139,0.08)'} },
+        yC:{ type:'linear', position:'right', min:0,
+             ticks:{maxTicksLimit:4,font:{size:9},color:'#64748b'},
+             grid:{display:false} }
+      }
+    }
+  });
+}
+
+/* On load: render sparkline if previous cycles are already stored */
+document.addEventListener('DOMContentLoaded', function(){
+  if(FEATURE_SENTIMENT_TREND) renderTrendChart();
+});
+
 
 /* ═══════ AUTO-START + VISIBILITY CATCH-UP ═══════ */
 
@@ -1146,14 +1582,18 @@ function renderFigureMonitor(figureMentions){
   if(!grid || !figureMentions || !figureMentions.length) return;
 
   var totalMentions = figureMentions.reduce(function(s,f){ return s + (f.count||0); }, 0);
-  var meta = document.getElementById('figMonitorMeta');
-  if(meta) meta.textContent = totalMentions + ' mention' + (totalMentions!==1?'s':'') + ' this cycle';
+  var activeFigs    = figureMentions.filter(function(f){ return (f.count||0) > 0; }).length;
+  var metaEl = document.getElementById('figMonitorMeta');
+  if(metaEl) metaEl.textContent =
+    totalMentions + ' mention' + (totalMentions!==1?'s':'') +
+    ' · ' + activeFigs + ' of ' + figureMentions.length + ' figures active';
 
   var sevColor = {high:'var(--red2)', medium:'var(--amber)', low:'var(--text3)'};
   var sevBg    = {high:'rgba(220,38,38,0.12)', medium:'rgba(217,119,6,0.12)', low:'rgba(100,116,139,0.08)'};
 
-  grid.innerHTML = figureMentions.map(function(fig){
-    var pc = PARTY_COLOR[fig.party] || '';
+  /* ── Build a single figure card as HTML string ── */
+  function makeCard(fig){
+    var pc   = PARTY_COLOR[fig.party] || '';
     var meta = FIGURES_META[fig.name] || {};
     var links = '';
     if(meta.fb && meta.fb !== '#') links += '<a class="fig-link" href="'+meta.fb+'" target="_blank">FB</a>';
@@ -1183,13 +1623,69 @@ function renderFigureMonitor(figureMentions){
       '<div class="fig-role">'+fig.role+'</div>' +
       (links ? '<div class="fig-links">'+links+'</div>' : '') +
       '<div class="fig-mentions">' +
-        '<div class="fig-mention-count'+(fig.count?'  has-mentions':'')+'">'+
+        '<div class="fig-mention-count'+(fig.count?' has-mentions':'')+'">'+
           (fig.count ? '● '+fig.count+' mention'+(fig.count!==1?'s':'') : '○ No mentions') +
         '</div>' +
         mentionsHtml +
       '</div>' +
     '</div>';
-  }).join('');
+  }
+
+  /* ── Sort: figures with mentions first (count desc), then alphabetical ── */
+  var sorted = figureMentions.slice().sort(function(a,b){
+    var ca = a.count||0, cb = b.count||0;
+    if(ca !== cb) return cb - ca;
+    return (a.name||'').localeCompare(b.name||'');
+  });
+
+  /* ── Split into visible (top 9) and hidden (rest) ── */
+  var VISIBLE_MAX = 9;
+  var visible = sorted.slice(0, VISIBLE_MAX);
+  var hidden  = sorted.slice(VISIBLE_MAX);
+
+  var html = visible.map(makeCard).join('');
+
+  if(hidden.length){
+    var hiddenCards = hidden.map(makeCard).join('');
+    var noMentionCount = hidden.filter(function(f){ return !(f.count||0); }).length;
+    var label = hidden.length + ' more candidate' + (hidden.length!==1?'s':'') +
+                (noMentionCount === hidden.length ? ' — no recent mentions' : '') + ' ▾';
+
+    html +=
+      '<div style="grid-column:1/-1;margin-top:2px">' +
+        '<button class="ctrl-btn" id="figMoreBtn" style="font-size:11px;padding:5px 12px;color:var(--text3);border-style:dashed" onclick="toggleHiddenFigures()">' +
+          '<span class="btn-icon">👥</span>' +
+          '<span id="figMoreLabel">'+label+'</span>' +
+        '</button>' +
+        '<div id="figHiddenWrap" style="display:none;margin-top:8px">' +
+          '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px">' +
+            hiddenCards +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  grid.innerHTML = html;
+}
+
+function toggleHiddenFigures(){
+  var wrap  = document.getElementById('figHiddenWrap');
+  var label = document.getElementById('figMoreLabel');
+  var btn   = document.getElementById('figMoreBtn');
+  if(!wrap) return;
+  var opening = (wrap.style.display === 'none');
+  wrap.style.display = opening ? 'block' : 'none';
+  if(btn) btn.style.borderStyle = opening ? 'solid' : 'dashed';
+  if(label){
+    if(opening){
+      label.textContent = label.textContent.replace('▾','▴').replace('no recent mentions','').trim();
+    } else {
+      var count = wrap.querySelectorAll('.fig-card').length;
+      var noMen = wrap.querySelectorAll('.fig-card .fig-mention-count:not(.has-mentions)').length;
+      label.textContent = count + ' more candidate' + (count!==1?'s':'') +
+                          (noMen===count ? ' — no recent mentions' : '') + ' ▾';
+    }
+  }
 }
 
 /* ═══════ MEMORY SYSTEM ═══════ */
@@ -1427,6 +1923,234 @@ setTimeout(function(){
   addTimeBadge('feedAlerts',   '48h','#d97706');
   addTimeBadge('feedMCC',      '48h','#d97706');
 },200);
+
+
+/* ═══════ DARK / LIGHT THEME TOGGLE ═══════ */
+var THEME_KEY = 'wb_intel_theme';
+
+function _applyTheme(dark){
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : '');
+  var btn = document.getElementById('themeToggleBtn');
+  if(btn) btn.textContent = dark ? '☀\uFE0F Light' : '🌙 Dark';
+}
+
+function toggleTheme(){
+  var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  var next   = !isDark;
+  _applyTheme(next);
+  try{ localStorage.setItem(THEME_KEY, next ? 'dark' : 'light'); }catch(e){}
+}
+
+// Apply saved theme immediately on load (before first paint)
+(function(){
+  try{
+    var saved = localStorage.getItem(THEME_KEY);
+    if(saved === 'dark') _applyTheme(true);
+  }catch(e){}
+})();
+
+
+/* ═══════ ARTICLE DIGEST MODAL ═══════ */
+var _digestReadKey = 'wb_intel_digest_read';
+var _digestNight   = false;
+var _digestData    = [];    // last loaded articles
+
+function _readIds(){
+  try{ return new Set(JSON.parse(localStorage.getItem(_digestReadKey)||'[]')); }
+  catch(e){ return new Set(); }
+}
+function _saveReadIds(s){
+  try{ localStorage.setItem(_digestReadKey, JSON.stringify([...s])); }catch(e){}
+}
+
+function _relTime(isoStr){
+  if(!isoStr) return '';
+  var diff = (Date.now() - new Date(isoStr).getTime()) / 60000; // minutes
+  if(diff < 60)   return Math.round(diff) + 'm ago';
+  if(diff < 1440) return Math.round(diff/60) + 'h ago';
+  return Math.round(diff/1440) + 'd ago';
+}
+
+function _digestCard(art, readSet){
+  var isRead  = readSet.has(art.id);
+  var sevCls  = art.severity === 'high' ? 'da-high' : 'da-medium';
+  var sevBadge= art.severity === 'high'
+    ? '<span class="da-sev da-sev-high">HIGH</span>'
+    : '<span class="da-sev da-sev-med">MED</span>';
+  var panelBadge = '<span class="da-panel">'+art.panel+'</span>';
+  var timeStr    = _relTime(art.first_seen);
+  var titleHtml  = art.url
+    ? '<a href="'+art.url+'" target="_blank" rel="noopener">'+_esc(art.title)+'</a>'
+    : _esc(art.title);
+
+  var bodyHtml = '';
+  if(art.digest_status === 'done' && art.digest){
+    bodyHtml = '<div class="da-digest">'+_esc(art.digest)+'</div>';
+  } else if(art.digest_status === 'pending' || art.digest_status === 'processing'){
+    bodyHtml = '<div class="da-pending">⏳ Digest generating…</div>';
+  } else if(art.digest_status === 'failed'){
+    bodyHtml = '<div class="da-failed">Digest unavailable — <a href="'+art.url+'" target="_blank">read original</a></div>';
+  }
+
+  var readBtn = isRead
+    ? '<button class="da-act-btn" onclick="toggleRead('+art.id+',this)">↩ Mark unread</button>'
+    : '<button class="da-act-btn" onclick="toggleRead('+art.id+',this)">✓ Mark read</button>';
+  var redigestBtn = (art.digest_status==='failed'||art.digest_status==='done')
+    ? '<button class="da-act-btn" onclick="redigest('+art.id+')">↻ Re-digest</button>'
+    : '';
+
+  return '<div class="da-card '+sevCls+(isRead?' da-read':'')+'" id="da-'+art.id+'">'
+    + '<div class="da-row1">'+sevBadge+panelBadge
+    + '<span class="da-source">'+_esc(art.source)+'</span>'
+    + '<span class="da-time">'+timeStr+'</span></div>'
+    + '<div class="da-title">'+titleHtml+'</div>'
+    + bodyHtml
+    + '<div class="da-actions">'+readBtn+redigestBtn+'</div>'
+    + '</div>';
+}
+
+function _esc(s){
+  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function loadDigests(){
+  var days = document.getElementById('dmDaysFilter').value;
+  var sev  = document.getElementById('dmSevFilter').value;
+  var body = document.getElementById('dmBody');
+  var stats = document.getElementById('dmStats');
+  if(body) body.innerHTML = '<div class="dm-empty">Loading…</div>';
+
+  var endpoint = (window.location.protocol === 'http:')
+    ? window.location.origin + '/api/digests'
+    : 'http://localhost:5050/api/digests';
+
+  fetch(endpoint + '?days='+days+'&sev='+sev)
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      _digestData = data.articles || [];
+      var st = data.stats || {};
+      var done    = st.done    || 0;
+      var pending = (st.pending||0) + (st.processing||0);
+      var failed  = st.failed  || 0;
+      var total   = _digestData.length;
+      var readSet = _readIds();
+      var unread  = _digestData.filter(function(a){ return a.digest_status==='done' && !readSet.has(a.id); }).length;
+
+      // Update sidebar counts
+      var doneEl = document.getElementById('digestDoneCount');
+      var pendEl = document.getElementById('digestPendingCount');
+      var badge  = document.getElementById('digestUnreadBadge');
+      if(doneEl) doneEl.textContent = done;
+      if(pendEl) pendEl.textContent = pending + (failed ? ' ('+failed+' failed)' : '');
+      if(badge){ badge.textContent = unread; badge.className = 'digest-badge'+(unread?' show':''); }
+
+      if(stats) stats.innerHTML =
+        '<span class="dm-stat-pill done">✓ '+done+' digested</span>'
+        + '<span class="dm-stat-pill pending">⏳ '+pending+' pending</span>'
+        + (failed ? '<span class="dm-stat-pill">✗ '+failed+' failed</span>' : '')
+        + '<span class="dm-stat-pill high">'+total+' total · '+unread+' unread</span>';
+
+      if(!_digestData.length){
+        if(body) body.innerHTML = '<div class="dm-empty">No articles yet. Run a fetch cycle to populate the digest queue.</div>';
+        return;
+      }
+
+      var html = _digestData.map(function(a){ return _digestCard(a, readSet); }).join('');
+      if(body){ body.innerHTML = html; if(_digestNight) body.parentElement.classList.add('dm-nightmode'); }
+    })
+    .catch(function(e){
+      if(body) body.innerHTML = '<div class="dm-empty" style="color:var(--red)">Failed to load digests.<br><span style="font-size:11px">Is the proxy running? '+e.message+'</span></div>';
+    });
+}
+
+function openDigest(){
+  document.getElementById('digestModal').classList.add('open');
+  loadDigests();
+}
+function closeDigest(){
+  document.getElementById('digestModal').classList.remove('open');
+}
+
+function toggleNightMode(){
+  _digestNight = !_digestNight;
+  var body = document.getElementById('dmBody');
+  var btn  = document.getElementById('dmNightBtn');
+  if(body){ if(_digestNight) body.parentElement.classList.add('dm-nightmode');
+            else body.parentElement.classList.remove('dm-nightmode'); }
+  if(btn) btn.textContent = _digestNight ? '☀ Normal view' : '🌙 Night brief';
+}
+
+function toggleRead(id, btn){
+  var s = _readIds();
+  if(s.has(id)){ s.delete(id); } else { s.add(id); }
+  _saveReadIds(s);
+  var card = document.getElementById('da-'+id);
+  if(card){ card.classList.toggle('da-read', s.has(id)); }
+  if(btn) btn.textContent = s.has(id) ? '↩ Mark unread' : '✓ Mark read';
+  // Update sidebar unread badge
+  var unread = _digestData.filter(function(a){ return a.digest_status==='done' && !s.has(a.id); }).length;
+  var badge = document.getElementById('digestUnreadBadge');
+  if(badge){ badge.textContent = unread; badge.className = 'digest-badge'+(unread?' show':''); }
+}
+
+function markAllRead(){
+  var s = _readIds();
+  _digestData.forEach(function(a){ s.add(a.id); });
+  _saveReadIds(s);
+  document.querySelectorAll('.da-card').forEach(function(c){ c.classList.add('da-read'); });
+  var badge = document.getElementById('digestUnreadBadge');
+  if(badge){ badge.textContent = '0'; badge.className = 'digest-badge'; }
+}
+
+function redigest(id){
+  var endpoint = (window.location.protocol==='http:')
+    ? window.location.origin+'/api/digest/redigest?id='+id
+    : 'http://localhost:5050/api/digest/redigest?id='+id;
+  fetch(endpoint).then(function(){
+    var card = document.getElementById('da-'+id);
+    if(card){
+      var b = card.querySelector('.da-digest, .da-pending, .da-failed');
+      if(b) b.outerHTML = '<div class="da-pending">⏳ Re-queued for digesting…</div>';
+    }
+  });
+}
+
+function exportDigests(){
+  var done = _digestData.filter(function(a){ return a.digest_status==='done'; });
+  if(!done.length){ alert('No completed digests to export yet.'); return; }
+  var lines = ['WB ELECTION INTEL — ARTICLE DIGEST EXPORT',
+               'Generated: '+new Date().toLocaleString('en-IN'), ''];
+  var prev = '';
+  done.forEach(function(a){
+    var panel = (a.panel||'').toUpperCase();
+    if(panel !== prev){ lines.push('\n── '+panel+' ──────────────────────'); prev=panel; }
+    lines.push('\n['+a.severity.toUpperCase()+'] '+a.title);
+    lines.push('Source: '+a.source+'  |  '+_relTime(a.first_seen));
+    if(a.digest) lines.push(a.digest);
+    if(a.url)    lines.push('↗ '+a.url);
+  });
+  var blob = new Blob([lines.join('\n')], {type:'text/plain'});
+  var link = document.createElement('a');
+  link.href     = URL.createObjectURL(blob);
+  link.download = 'bankura_digest_'+new Date().toISOString().slice(0,10)+'.txt';
+  link.click();
+}
+
+// Poll sidebar counts every 2 min while page is open (catches background digests completing)
+setInterval(function(){
+  var endpoint = (window.location.protocol==='http:')
+    ? window.location.origin+'/api/digests?days=7&status=done'
+    : 'http://localhost:5050/api/digests?days=7&status=done';
+  fetch(endpoint).then(function(r){ return r.json(); }).then(function(data){
+    var done  = (data.articles||[]).length;
+    var readS = _readIds();
+    var unread= (data.articles||[]).filter(function(a){ return !readS.has(a.id); }).length;
+    var doneEl = document.getElementById('digestDoneCount');
+    var badge  = document.getElementById('digestUnreadBadge');
+    if(doneEl) doneEl.textContent = done;
+    if(badge){ badge.textContent=unread; badge.className='digest-badge'+(unread?' show':''); }
+  }).catch(function(){});
+}, 2 * 60 * 1000);
 
 
 </script>
