@@ -1669,15 +1669,16 @@ def inject_news_into_payload(payload_dict):
     return payload_dict
 
 
-# ── Phase 4B: Daily Briefing (ntfy.sh + Fast2SMS fallback) ───────────────────
+# ── Phase 4B: Daily Briefing (Telegram Bot + Fast2SMS fallback) ───────────────
 #
 # RISK & MITIGATION (hardcoded per design):
 #
-#   RISK 1 — ntfy.sh topic guessed by third parties
-#     MITIGATION: User must set a long random topic string (e.g. wb_bankura_x7k9p2).
-#                 Proxy warns if topic is shorter than 12 chars.
+#   RISK 1 — Telegram bot token exposed / unauthorised sends
+#     MITIGATION: Token stored only in local SQLite (never committed — .gitignore).
+#                 Displayed as password field in UI. Anyone with the token can send
+#                 to the bot, but the bot only delivers to the registered chat_id.
 #
-#   RISK 2 — ntfy.sh unreachable on field network (govt/hotel Wi-Fi blocks)
+#   RISK 2 — Telegram unreachable on field network (govt/hotel Wi-Fi blocks)
 #     MITIGATION: Fast2SMS SMS fallback. Enabled only when api_key is configured.
 #                 SMS is intentionally DISABLED until user supplies Fast2SMS key.
 #
@@ -1695,7 +1696,7 @@ def inject_news_into_payload(payload_dict):
 #
 #   RISK 6 — Brief too long for SMS (160 char limit per segment)
 #     MITIGATION: SMS variant is separately formatted to ≤320 chars (2 segments).
-#                 ntfy.sh variant is full-length (no practical limit).
+#                 Telegram variant uses HTML mode; split into 2 messages if >4096.
 
 FEATURE_BRIEFING = True    # master switch — set False to disable entirely
 BRIEFING_SMS_ENABLED = False  # SMS via Fast2SMS — OFF until user supplies API key
@@ -1703,15 +1704,16 @@ BRIEFING_SMS_ENABLED = False  # SMS via Fast2SMS — OFF until user supplies API
 # ── Briefing config helpers ───────────────────────────────────────────────────
 
 _BRIEFING_DEFAULTS = {
-    "enabled":              "false",
-    "ntfy_topic":           "",
-    "schedule_time":        "08:00",   # IST, 24h format
-    "escalate_on_high":     "true",
-    "escalate_on_critical": "true",
-    "election_day_interval":"120",     # minutes between briefings on election day
-    "sms_provider":         "fast2sms",
-    "sms_api_key":          "",        # Fast2SMS key — blank = SMS disabled
-    "sms_phone":            "",        # +91XXXXXXXXXX
+    "enabled":                "false",
+    "telegram_bot_token":     "",      # from @BotFather — stored as password in UI
+    "telegram_chat_id":       "",      # auto-detected or pasted from /api/telegram/chatid
+    "schedule_time":          "08:00", # IST, 24h format
+    "escalate_on_high":       "true",
+    "escalate_on_critical":   "true",
+    "election_day_interval":  "120",   # minutes between briefings on election day
+    "sms_provider":           "fast2sms",
+    "sms_api_key":            "",      # Fast2SMS key — blank = SMS disabled
+    "sms_phone":              "",      # +91XXXXXXXXXX
 }
 
 def _load_briefing_config():
@@ -1771,43 +1773,62 @@ def _log_briefing_send(trigger, threat_level, headline, ntfy_status, sms_status,
 
 # ── Brief formatter ───────────────────────────────────────────────────────────
 
-def _format_brief_ntfy(parsed, trigger, ts):
-    """Format a full briefing for ntfy.sh (no length limit)."""
+def _format_brief_telegram(parsed, trigger, ts):
+    """
+    Format a full briefing for Telegram (HTML parse_mode).
+    Telegram HTML supports: <b>, <i>, <code>, <pre>.
+    Returns list of message strings — usually 1, max 2 (split if >4096 chars).
+    """
     m  = parsed.get("metrics", {})
     an = parsed.get("analysis", {})
     tl = m.get("threatLevel", "LOW")
     tl_emoji = {"LOW":"🟢","MODERATE":"🟡","HIGH":"🔴","CRITICAL":"🚨"}.get(tl, "🔵")
 
-    trigger_label = {"scheduled":"[Scheduled]","escalation":"[ESCALATION ALERT]","manual":"[Manual]"}.get(trigger,"[Brief]")
+    trigger_label = {
+        "scheduled":  "[Scheduled]",
+        "escalation": "[ESCALATION ALERT]",
+        "manual":     "[Manual test]",
+    }.get(trigger, "[Brief]")
 
     risks   = an.get("keyRisks", [])
     actions = an.get("observerActions", [])
 
     lines = [
-        f"{trigger_label} {ts}",
-        f"--------------------",
-        f"Threat: {tl_emoji} {tl}  |  Signals: {m.get('totalSignals',0)}  |  High alerts: {m.get('highAlerts',0)}",
+        f"<b>{trigger_label} — {ts}</b>",
+        f"{'—'*28}",
+        f"Threat: {tl_emoji} <b>{tl}</b>  |  Signals: {m.get('totalSignals',0)}  |  High: {m.get('highAlerts',0)}",
         f"",
-        f"HEADLINE:",
-        an.get("headline","—"),
+        f"<b>HEADLINE</b>",
+        an.get("headline", "No analysis available"),
         f"",
     ]
     if risks:
-        lines.append("KEY RISKS:")
+        lines.append("<b>KEY RISKS</b>")
         for r in risks:
             if r: lines.append(f"• {r}")
         lines.append("")
     if actions:
-        lines.append("OBSERVER ACTIONS:")
+        lines.append("<b>OBSERVER ACTIONS</b>")
         for a in actions:
             if a: lines.append(f"• {a}")
         lines.append("")
-    disinfo = an.get("disinfoAlerts","")
-    if disinfo and disinfo.lower() not in ("none detected","none",""):
-        lines.append(f"⚠️ DISINFO: {disinfo}")
+    disinfo = an.get("disinfoAlerts", "")
+    if disinfo and disinfo.lower() not in ("none detected", "none", ""):
+        lines.append(f"⚠️ <b>DISINFO:</b> {disinfo}")
         lines.append("")
-    lines.append(an.get("overallAssessment",""))
-    return "\n".join(lines).strip()
+    assessment = an.get("overallAssessment", "")
+    if assessment:
+        lines.append(f"<i>{assessment}</i>")
+
+    full = "\n".join(lines).strip()
+
+    # Split into ≤4096-char messages (Telegram limit) at paragraph boundaries
+    if len(full) <= 4096:
+        return [full]
+    split_at = full.rfind("\n\n", 0, 4000)
+    if split_at == -1:
+        split_at = 4000
+    return [full[:split_at].strip(), full[split_at:].strip()]
 
 def _format_brief_sms(parsed, trigger, ts):
     """Format a compact briefing for SMS (≤320 chars, 2 segments)."""
@@ -1827,32 +1848,38 @@ def _format_brief_sms(parsed, trigger, ts):
 
 # ── Send functions ────────────────────────────────────────────────────────────
 
-def _send_ntfy(topic, title, body, priority="default"):
+def _send_telegram(token, chat_id, messages):
     """
-    POST a briefing to ntfy.sh/{topic}.
-    Returns ('ok', '') or ('error', reason).
+    Send one or more messages to a Telegram chat via the Bot API.
+    messages: list of HTML-formatted strings (from _format_brief_telegram).
+    Returns ('ok', 'N sent') or ('error', reason) or ('skip', reason).
     """
-    if not topic or len(topic) < 8:
-        return ("skip", "topic too short or not set")
-    try:
-        # Encode body as UTF-8; ASCII-safe title (ntfy headers are latin-1)
-        payload     = body.encode("utf-8")
-        safe_title  = title.encode("ascii", errors="replace").decode("ascii")
-        req = urllib.request.Request(
-            f"https://ntfy.sh/{topic}",
-            data=payload,
-            headers={
-                "Title":    safe_title,
-                "Priority": priority,
-                "Tags":     "election,briefing",
-                "Content-Type": "text/plain; charset=utf-8",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return ("ok", str(resp.status))
-    except Exception as e:
-        return ("error", str(e)[:120])
+    if not token or not token.strip():
+        return ("skip", "bot token not configured")
+    if not chat_id or not chat_id.strip():
+        return ("skip", "chat_id not configured — use Auto-detect or paste from Telegram")
+    sent = 0
+    for msg in messages:
+        try:
+            payload = json.dumps({
+                "chat_id":    chat_id.strip(),
+                "text":       msg,
+                "parse_mode": "HTML",
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                f"https://api.telegram.org/bot{token.strip()}/sendMessage",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read())
+                if not data.get("ok"):
+                    return ("error", str(data.get("description", data))[:120])
+                sent += 1
+        except Exception as e:
+            return ("error", str(e)[:120])
+    return ("ok", f"{sent} message(s) sent")
 
 def _send_sms_fast2sms(api_key, phone, message):
     """
@@ -1901,20 +1928,21 @@ def _send_briefing(trigger="manual"):
     trigger: 'scheduled' | 'escalation' | 'manual'
     """
     if not FEATURE_BRIEFING:
-        return {"ntfy": "skip", "sms": "skip", "reason": "feature disabled"}
+        return {"tg": "skip", "sms": "skip", "reason": "feature disabled"}
 
     cfg = _load_briefing_config()
     if cfg["enabled"] != "true" and trigger != "manual":
-        return {"ntfy": "skip", "sms": "skip", "reason": "briefing disabled"}
+        return {"tg": "skip", "sms": "skip", "reason": "briefing disabled"}
 
-    ntfy_topic = cfg.get("ntfy_topic", "").strip()
-    sms_key    = cfg.get("sms_api_key", "").strip()
-    sms_phone  = cfg.get("sms_phone", "").strip()
+    tg_token  = cfg.get("telegram_bot_token", "").strip()
+    tg_chatid = cfg.get("telegram_chat_id", "").strip()
+    sms_key   = cfg.get("sms_api_key", "").strip()
+    sms_phone = cfg.get("sms_phone", "").strip()
 
     # Fetch latest cycle from DB
-    cycle_id   = None
-    parsed     = {}
-    ts         = datetime.now().strftime("%d %b %Y %H:%M IST")
+    cycle_id = None
+    parsed   = {}
+    ts       = datetime.now().strftime("%d %b %Y %H:%M IST")
     if FEATURE_SQLITE:
         try:
             with _db_lock:
@@ -1925,7 +1953,13 @@ def _send_briefing(trigger="manual"):
                 c.close()
             if row:
                 cycle_id = row["id"]
-                ts       = row["fetched_at"] or ts
+                raw_ts   = row["fetched_at"] or ""
+                if raw_ts:
+                    try:
+                        dt = datetime.fromisoformat(raw_ts).astimezone()
+                        ts = dt.strftime("%d %b %Y %H:%M IST")
+                    except Exception:
+                        ts = raw_ts
                 parsed   = json.loads(row["full_json"] or "{}")
         except Exception as e:
             print(f"  [briefing] DB read error: {e}")
@@ -1936,32 +1970,27 @@ def _send_briefing(trigger="manual"):
     # Dedup: skip if already sent for this cycle+trigger+threat combo
     if cycle_id and _briefing_already_sent(trigger, cycle_id, threat_level):
         print(f"  [briefing] Dedup skip — already sent ({trigger}, cycle {cycle_id})")
-        return {"ntfy": "skip", "sms": "skip", "reason": "already sent"}
+        return {"tg": "skip", "sms": "skip", "reason": "already sent"}
 
     # Format briefs
-    ntfy_body  = _format_brief_ntfy(parsed, trigger, ts)
-    sms_body   = _format_brief_sms(parsed, trigger, ts)
-    tl_emoji   = {"LOW":"🟢","MODERATE":"🟡","HIGH":"🔴","CRITICAL":"🚨"}.get(threat_level,"🔵")
-    ntfy_title = f"WB Intel - {tl_emoji} {threat_level} | Bankura"
+    tg_messages = _format_brief_telegram(parsed, trigger, ts)
+    sms_body    = _format_brief_sms(parsed, trigger, ts)
 
-    # Set ntfy priority
-    ntfy_priority = "high" if threat_level in ("HIGH","CRITICAL") else "default"
-
-    # Send ntfy
-    ntfy_status, ntfy_detail = _send_ntfy(ntfy_topic, ntfy_title, ntfy_body, ntfy_priority)
-    print(f"  [briefing] ntfy → {ntfy_status} ({ntfy_detail}) | topic={ntfy_topic[:12]}…")
+    # Send Telegram
+    tg_status, tg_detail = _send_telegram(tg_token, tg_chatid, tg_messages)
+    print(f"  [briefing] telegram → {tg_status} ({tg_detail}) | chat={tg_chatid[:8]}…")
 
     # Send SMS (only if enabled + configured)
     sms_status, sms_detail = _send_sms_fast2sms(sms_key, sms_phone, sms_body)
     if sms_status != "skip":
         print(f"  [briefing] sms → {sms_status} ({sms_detail})")
 
-    # Log to DB
-    _log_briefing_send(trigger, threat_level, headline, ntfy_status, sms_status, cycle_id)
+    # Log to DB (ntfy_status column reused for Telegram status)
+    _log_briefing_send(trigger, threat_level, headline, tg_status, sms_status, cycle_id)
 
     return {
-        "ntfy":         ntfy_status,
-        "ntfy_detail":  ntfy_detail,
+        "tg":           tg_status,
+        "tg_detail":    tg_detail,
         "sms":          sms_status,
         "sms_detail":   sms_detail,
         "threat_level": threat_level,
@@ -2065,6 +2094,40 @@ def _start_briefing_scheduler():
                 time.sleep(60)
 
     threading.Thread(target=_scheduler_loop, daemon=True, name="briefing-scheduler").start()
+
+def _save_cycle(result):
+    """Persist a completed fetch cycle to the cycles table."""
+    if not FEATURE_SQLITE or not result:
+        return
+    try:
+        # result may be an Anthropic envelope — unwrap content[0].text if needed
+        if "content" in result and isinstance(result.get("content"), list):
+            try:
+                parsed = json.loads(result["content"][0]["text"])
+            except Exception:
+                return
+        else:
+            parsed = result
+        m  = parsed.get("metrics") or {}
+        ts = datetime.now(timezone.utc).isoformat()
+        with _db_lock:
+            c = _db_conn()
+            c.execute("""
+                INSERT INTO cycles (fetched_at, threat_level, total_signals, high_alerts, violence_reports, full_json)
+                VALUES (?,?,?,?,?,?)
+            """, (
+                ts,
+                m.get("threatLevel", "LOW"),
+                m.get("totalSignals", 0),
+                m.get("highAlerts", 0),
+                m.get("violenceReports", 0),
+                json.dumps(parsed),
+            ))
+            c.commit(); c.close()
+        print(f"  [cycle] Saved — threat={m.get('threatLevel','LOW')} signals={m.get('totalSignals',0)}")
+    except Exception as e:
+        print(f"  [cycle] Save error: {e}")
+
 
 def _last_briefing_sent_at():
     """Return ISO timestamp of most recent briefing send, or None."""
@@ -2536,11 +2599,13 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
         elif path == "/api/briefing/config":
-            # GET /api/briefing/config — return current config (mask SMS key)
+            # GET /api/briefing/config — return current config (mask sensitive keys)
             cfg = _load_briefing_config()
             safe = dict(cfg)
+            if safe.get("telegram_bot_token"):
+                safe["telegram_bot_token"] = "***"   # never expose token to browser
             if safe.get("sms_api_key"):
-                safe["sms_api_key"] = "***"   # never expose key to browser
+                safe["sms_api_key"] = "***"
             body = json.dumps(safe).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -2555,6 +2620,40 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self._cors(); self.end_headers()
             self.wfile.write(body)
+
+        elif path == "/api/telegram/chatid":
+            # GET /api/telegram/chatid?token=... — auto-detect chat_id from getUpdates
+            token = ""
+            if "?" in self.path:
+                token = parse_qs(self.path.split("?",1)[1]).get("token",[""])[0].strip()
+            if not token:
+                # fall back to saved token
+                token = _load_briefing_config().get("telegram_bot_token","").strip()
+            if not token:
+                self._reply(400, json.dumps({"error": "bot token required"}).encode())
+                return
+            try:
+                url = f"https://api.telegram.org/bot{token}/getUpdates"
+                req = urllib.request.Request(url, headers={"User-Agent": "WBIntelProxy/1"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = json.loads(resp.read())
+                if not data.get("ok"):
+                    self._reply(502, json.dumps({"error": data.get("description","Telegram error")}).encode())
+                    return
+                results = data.get("result", [])
+                if not results:
+                    self._reply(200, json.dumps({
+                        "chat_id": None,
+                        "hint": "No messages found — send /start to your bot first, then retry"
+                    }).encode())
+                    return
+                # Pick the most recent chat_id
+                msg = results[-1].get("message") or results[-1].get("channel_post") or {}
+                chat_id = str((msg.get("chat") or {}).get("id",""))
+                chat_title = (msg.get("chat") or {}).get("title") or (msg.get("from") or {}).get("first_name","")
+                self._reply(200, json.dumps({"chat_id": chat_id, "chat_title": chat_title}).encode())
+            except Exception as e:
+                self._reply(502, json.dumps({"error": str(e)[:200]}).encode())
 
         elif path == "/api/briefing/history":
             # GET /api/briefing/history?limit=20
@@ -2669,19 +2768,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == "/api/briefing/config":
-            # POST /api/briefing/config — save config {enabled, ntfy_topic, schedule_time, ...}
+            # POST /api/briefing/config — save config {enabled, telegram_bot_token, ...}
             try:
                 length = int(self.headers.get("Content-Length", 0))
                 body   = json.loads(self.rfile.read(length))
                 allowed = set(_BRIEFING_DEFAULTS.keys())
                 updates = {k: v for k, v in body.items() if k in allowed}
-                # RISK 1 guard: warn on short topic
-                topic = updates.get("ntfy_topic", "")
-                if topic and len(topic) < 12:
-                    self._reply(400, json.dumps({
-                        "error": "ntfy_topic too short — use at least 12 chars for security"
-                    }).encode())
-                    return
                 _save_briefing_config(updates)
                 self._reply(200, json.dumps({"ok": True}).encode())
             except Exception as e:
@@ -2743,6 +2835,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Unknown backend: " + b)
             if pre_built:
                 result = merge_prebuilt_with_analysis(result, pre_built)
+            # Persist completed cycle to DB for briefing + history
+            _save_cycle(result)
             return result
 
         try:

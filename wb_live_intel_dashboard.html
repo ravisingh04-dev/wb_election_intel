@@ -591,18 +591,28 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
         <span class="btn-icon">▶</span> Send now (test)
       </button>
 
-      <div style="margin-top:8px">
-        <div style="font-size:10px;color:var(--text3);margin-bottom:3px">ntfy.sh topic</div>
-        <input type="text" id="briefingNtfyTopic" placeholder="your_topic_min12chars"
-          style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:5px 7px;font-size:11px;font-family:'JetBrains Mono',monospace">
-        <div style="font-size:9px;color:var(--text3);margin-top:3px">
-          Phone app: subscribe to<br>
-          <span style="font-family:'JetBrains Mono',monospace;color:var(--accent2);word-break:break-all" id="briefingTopicPreview">your_topic</span>
+      <!-- Telegram setup -->
+      <div style="margin-top:8px;padding:7px 8px;background:var(--bg3);border-radius:6px;border:1px solid var(--border)">
+        <div style="font-size:9px;font-weight:600;color:var(--accent2);margin-bottom:5px;letter-spacing:.05em">TELEGRAM BOT</div>
+
+        <div style="font-size:9px;color:var(--text3);margin-bottom:4px;line-height:1.5">
+          1. Message <code style="color:var(--accent2)">@BotFather</code> → <code>/newbot</code> → copy token<br>
+          2. Open your bot → send <code>/start</code><br>
+          3. Paste token below → click Auto-detect
         </div>
-        <div style="font-size:9px;color:var(--text3);margin-top:2px">
-          <a id="briefingTopicLink" href="https://ntfy.sh/your_topic" target="_blank"
-            style="color:var(--accent3)">Open ntfy.sh/your_topic ↗</a>
+
+        <div style="font-size:10px;color:var(--text3);margin-bottom:2px">Bot token</div>
+        <input type="password" id="briefingTgToken" placeholder="123456:ABCdef…"
+          style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 6px;font-size:11px;font-family:'JetBrains Mono',monospace;margin-bottom:5px">
+
+        <div style="font-size:10px;color:var(--text3);margin-bottom:2px">Chat ID</div>
+        <div style="display:flex;gap:4px;align-items:center">
+          <input type="text" id="briefingTgChatId" placeholder="auto-detect or paste"
+            style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 6px;font-size:11px;font-family:'JetBrains Mono',monospace">
+          <button onclick="detectTelegramChatId()" title="Auto-detect chat ID from recent messages"
+            style="padding:4px 7px;background:var(--accent2);color:#000;border:none;border-radius:4px;cursor:pointer;font-size:10px;font-weight:700;white-space:nowrap">Auto</button>
         </div>
+        <div id="briefingTgDetectStatus" style="font-size:9px;color:var(--green2);min-height:12px;margin-top:2px"></div>
       </div>
 
       <div style="margin-top:6px;display:flex;gap:5px;align-items:center">
@@ -2541,57 +2551,52 @@ function _applyBriefingUI(cfg){
     if(badge){ badge.textContent='OFF'; badge.style.background='#94a3b822'; badge.style.color='var(--text3)'; }
     if(btn)  btn.innerHTML='<span class="btn-icon">📡</span> Enable daily briefing';
   }
-  var topicEl = document.getElementById('briefingNtfyTopic');
-  var prevEl  = document.getElementById('briefingTopicPreview');
-  if(topicEl && cfg.ntfy_topic){ topicEl.value = cfg.ntfy_topic; }
-  if(prevEl)  prevEl.textContent = cfg.ntfy_topic || 'your_topic';
+  // Telegram fields — token is masked (***) from server; don't overwrite if user has typed one
+  var chatIdEl = document.getElementById('briefingTgChatId');
+  if(chatIdEl && cfg.telegram_chat_id) chatIdEl.value = cfg.telegram_chat_id;
+  // Token: show placeholder indicating it's set if server returns ***
+  var tokenEl = document.getElementById('briefingTgToken');
+  if(tokenEl && cfg.telegram_bot_token === '***') tokenEl.placeholder = '(token saved — re-enter to change)';
   var schedEl = document.getElementById('briefingScheduleTime');
   if(schedEl && cfg.schedule_time) schedEl.value = cfg.schedule_time;
   var escH = document.getElementById('briefingEscHigh');
   var escC = document.getElementById('briefingEscCritical');
   if(escH) escH.checked = cfg.escalate_on_high !== 'false';
   if(escC) escC.checked = cfg.escalate_on_critical !== 'false';
-  // Update last sent
   _refreshBriefingLastSent();
-  // Live preview of topic + link
-  function _updateTopicPreview(val){
-    var t = val || 'your_topic';
-    if(prevEl) prevEl.textContent = t;
-    var linkEl = document.getElementById('briefingTopicLink');
-    if(linkEl){ linkEl.href='https://ntfy.sh/'+t; linkEl.textContent='Open ntfy.sh/'+t+' \u2197'; }
-  }
-  _updateTopicPreview(cfg.ntfy_topic || '');
-  if(topicEl) topicEl.oninput = function(){ _updateTopicPreview(this.value); };
 }
 
 function toggleBriefing(){
   _briefingEnabled = !_briefingEnabled;
-  var topic = (document.getElementById('briefingNtfyTopic')||{}).value||'';
-  if(_briefingEnabled && topic.length < 12){
+  var chatId = (document.getElementById('briefingTgChatId')||{}).value||'';
+  if(_briefingEnabled && !chatId.trim()){
     _briefingEnabled = false;
     var st = document.getElementById('briefingConfigStatus');
-    if(st){ st.style.color='var(--red2)'; st.textContent='Set a topic (min 12 chars) before enabling.'; }
+    if(st){ st.style.color='var(--red2)'; st.textContent='Set bot token + chat ID before enabling.'; }
     return;
   }
   saveBriefingConfig();
 }
 
 function saveBriefingConfig(){
-  var topic  = (document.getElementById('briefingNtfyTopic')||{}).value||'';
-  var sched  = (document.getElementById('briefingScheduleTime')||{}).value||'08:00';
-  var escH   = (document.getElementById('briefingEscHigh')||{}).checked !== false;
-  var escC   = (document.getElementById('briefingEscCritical')||{}).checked !== false;
-  var smsKey = (document.getElementById('briefingSmsKey')||{}).value||'';
+  var token    = (document.getElementById('briefingTgToken')||{}).value||'';
+  var chatId   = (document.getElementById('briefingTgChatId')||{}).value||'';
+  var sched    = (document.getElementById('briefingScheduleTime')||{}).value||'08:00';
+  var escH     = (document.getElementById('briefingEscHigh')||{}).checked !== false;
+  var escC     = (document.getElementById('briefingEscCritical')||{}).checked !== false;
+  var smsKey   = (document.getElementById('briefingSmsKey')||{}).value||'';
   var smsPhone = (document.getElementById('briefingSmsPhone')||{}).value||'';
-  var status = document.getElementById('briefingConfigStatus');
+  var status   = document.getElementById('briefingConfigStatus');
 
   var payload = {
     enabled:              _briefingEnabled ? 'true' : 'false',
-    ntfy_topic:           topic,
+    telegram_chat_id:     chatId,
     schedule_time:        sched,
-    escalate_on_high:     escH  ? 'true' : 'false',
-    escalate_on_critical: escC  ? 'true' : 'false',
+    escalate_on_high:     escH ? 'true' : 'false',
+    escalate_on_critical: escC ? 'true' : 'false',
   };
+  // Only send token if user has typed a new one (not the masked placeholder)
+  if(token && token !== '***') payload.telegram_bot_token = token;
   if(smsKey)   payload.sms_api_key = smsKey;
   if(smsPhone) payload.sms_phone   = smsPhone;
 
@@ -2621,12 +2626,40 @@ function sendBriefingNow(){
   fetch('/api/briefing/send')
     .then(function(r){ return r.json(); })
     .then(function(data){
-      var msg = 'ntfy: ' + data.ntfy + (data.sms && data.sms !== 'skip' ? ' · sms: '+data.sms : '');
-      if(status){ status.style.color = data.ntfy==='ok' ? 'var(--green2)' : 'var(--amber)'; status.textContent=msg; }
+      var msg = 'Telegram: ' + (data.tg||'—') + (data.sms && data.sms !== 'skip' ? ' · sms: '+data.sms : '');
+      if(data.tg === 'skip' && data.reason) msg += ' (' + data.reason + ')';
+      if(status){ status.style.color = data.tg==='ok' ? 'var(--green2)' : 'var(--amber)'; status.textContent=msg; }
       _refreshBriefingLastSent();
-      setTimeout(function(){ if(status) status.textContent=''; }, 5000);
+      setTimeout(function(){ if(status) status.textContent=''; }, 6000);
     })
     .catch(function(){ if(status){ status.style.color='var(--red2)'; status.textContent='Send failed'; } });
+}
+
+function detectTelegramChatId(){
+  var tokenEl  = document.getElementById('briefingTgToken');
+  var chatIdEl = document.getElementById('briefingTgChatId');
+  var stEl     = document.getElementById('briefingTgDetectStatus');
+  var token    = (tokenEl||{}).value||'';
+  if(stEl){ stEl.style.color='var(--text3)'; stEl.textContent='Detecting…'; }
+  var url = '/api/telegram/chatid' + (token && token !== '***' ? '?token=' + encodeURIComponent(token) : '');
+  fetch(url)
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if(data.error){
+        if(stEl){ stEl.style.color='var(--red2)'; stEl.textContent='Error: ' + data.error; }
+        return;
+      }
+      if(!data.chat_id){
+        if(stEl){ stEl.style.color='var(--amber)'; stEl.textContent=data.hint||'No messages found — send /start to your bot first'; }
+        return;
+      }
+      if(chatIdEl) chatIdEl.value = data.chat_id;
+      var label = data.chat_title ? data.chat_title + ' (' + data.chat_id + ')' : data.chat_id;
+      if(stEl){ stEl.style.color='var(--green2)'; stEl.textContent='✓ Detected: ' + label; }
+    })
+    .catch(function(e){
+      if(stEl){ stEl.style.color='var(--red2)'; stEl.textContent='Network error'; }
+    });
 }
 
 function _refreshBriefingLastSent(){
@@ -2671,8 +2704,8 @@ function openBriefingHistory(){
                     d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
         var tc = tColors[s.threat_level]||'#64748b';
         var ntfyBadge = s.ntfy_status==='ok'
-          ? '<span style="color:#22c55e;font-size:10px">✓ ntfy</span>'
-          : '<span style="color:#f97316;font-size:10px">✗ ntfy('+s.ntfy_status+')</span>';
+          ? '<span style="color:#22c55e;font-size:10px">✓ tg</span>'
+          : '<span style="color:#f97316;font-size:10px">✗ tg('+s.ntfy_status+')</span>';
         var smsBadge = s.sms_status && s.sms_status!=='skip'
           ? (s.sms_status==='ok'
               ? '<span style="color:#22c55e;font-size:10px;margin-left:6px">✓ sms</span>'
