@@ -353,6 +353,11 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 .fig-headline a:hover{color:var(--accent)}
 .fig-headline .sev-badge{font-size:9px;font-family:'JetBrains Mono',monospace;padding:1px 5px;border-radius:6px;margin-right:4px}
 .fig-no-mention{font-size:11px;color:var(--text3);font-style:italic;padding:2px 0}
+/* Phase 3B — candidate news strip */
+.fig-news-strip{margin-top:6px;padding-top:6px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:3px}
+.fig-news-item{font-size:10px;color:var(--text3);text-decoration:none;display:block;padding:3px 6px;border-radius:4px;background:var(--bg4);line-height:1.4;transition:color .12s}
+.fig-news-item:hover{color:var(--accent)}
+.fig-news-age{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--accent3);margin-right:4px;font-weight:600}
 
 /* ── PARTIES FEED BADGE ── */
 .fb-parties{background:rgba(139,92,246,0.15);color:var(--purple)}
@@ -1293,6 +1298,7 @@ async function runFetch(manual){
     updateDistrictMap(an);
     updateTicker((parsed.alerts||[]).concat(parsed.bankura||[]));
     renderFigureMonitor(parsed.figureMentions);
+    setTimeout(loadFiguresNews, 100);   // inject news strips after cards render
     showContextImages(tl);
 
     /* ── Phase 1 hooks ── */
@@ -1687,7 +1693,7 @@ function renderFigureMonitor(figureMentions){
       }).join('');
     }
 
-    return '<div class="fig-card party-'+pc+'">' +
+    return '<div class="fig-card party-'+pc+'" data-name="'+fig.name.replace(/"/g,'&quot;')+'">' +
       '<div class="fig-name">' +
         '<span>'+fig.name+'</span>' +
         '<span class="fig-party fig-party-'+pc+'">'+fig.party+'</span>' +
@@ -2287,6 +2293,54 @@ function _matchWireHeight(){
 loadWire();                                    // direct call — DOM ready (script at bottom)
 setInterval(loadWire, 10 * 60 * 1000);        // re-fetch every 10 min
 
+
+// ── Phase 3B: Candidate news monitor (Google News per AC) ─────────────────────
+function loadFiguresNews(){
+  var base = (window.location.protocol==='http:')
+    ? window.location.origin : 'http://localhost:5055';
+  fetch(base + '/api/figures-news')
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      var figures = data.figures || {};
+      var names   = Object.keys(figures);
+      if(!names.length) return;
+      // Inject a "Recent News" strip into each fig-card that has articles
+      names.forEach(function(name){
+        var articles = figures[name];
+        if(!articles || !articles.length) return;
+        // Find figure card by data-name attribute
+        var card = document.querySelector('.fig-card[data-name="'+name.replace(/"/g,'&quot;')+'"]');
+        if(!card) return;
+        // Remove any previously injected strip
+        var old = card.querySelector('.fig-news-strip');
+        if(old) old.parentNode.removeChild(old);
+        // Build strip HTML (up to 2 headlines)
+        var html = '<div class="fig-news-strip">'
+          + articles.slice(0,2).map(function(a){
+              var age = '';
+              try{
+                var h = Math.round((Date.now() - new Date(a.pub).getTime()) / 3600000);
+                age = '<span class="fig-news-age">' + (h < 1 ? '<1h' : h+'h') + '</span>';
+              }catch(e){}
+              return '<a class="fig-news-item" href="'+(a.url||'#')+'" target="_blank">'
+                + age + (a.title||'').replace(/</g,'&lt;').slice(0,90) + '</a>';
+            }).join('')
+          + '</div>';
+        card.insertAdjacentHTML('beforeend', html);
+      });
+      // Update meta label on figure monitor header
+      var total = names.reduce(function(s,n){ return s+(figures[n]?figures[n].length:0); },0);
+      var metaEl = document.getElementById('figMonitorMeta');
+      if(metaEl){
+        var base = metaEl.textContent.replace(/\s·\s\d+ news.*$/, '');
+        metaEl.textContent = base + ' · ' + total + ' news items';
+      }
+    })
+    .catch(function(){});   // silent fail — figures card works without this
+}
+
+setTimeout(loadFiguresNews, 2000);                    // slight delay after page settles
+setInterval(loadFiguresNews, 15 * 60 * 1000);         // refresh every 15 min
 
 // Poll sidebar counts every 2 min while page is open (catches background digests completing)
 setInterval(function(){

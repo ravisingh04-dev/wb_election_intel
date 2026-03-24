@@ -350,6 +350,84 @@ def _fetch_wire():
     _wire_cache = {"ts": time.time(), "items": items}
     return items
 
+# ── Phase 3B: Fetch candidate news from Google News (grouped by AC) ──────────
+def _fetch_figures_news():
+    """Fetch Google News per AC, tag articles back to individual candidates.
+    Returns dict: {candidate_name: [{"title","url","pub","source","ac"}]}
+    Cached 15 min; 13 AC-grouped queries run concurrently via threads."""
+    global _FIGURES_NEWS_CACHE
+    if time.time() - _FIGURES_NEWS_CACHE["ts"] < 900:   # 15-min cache
+        return _FIGURES_NEWS_CACHE["data"]
+
+    result = {}   # name -> list of articles
+    lock   = threading.Lock()
+
+    def _fetch_ac(ac_label, names, url):
+        try:
+            req  = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                raw = resp.read()
+            root = ET.fromstring(raw)
+            items = root.findall(".//item")
+            for it in items:
+                title = (it.findtext("title") or "").strip()
+                link  = it.findtext("link") or ""
+                pub   = it.findtext("pubDate") or ""
+                # Convert RFC2822 pubDate → ISO
+                try:
+                    import email.utils as _eu
+                    pub = datetime.fromtimestamp(
+                        _eu.parsedate_to_datetime(pub).timestamp(),
+                        tz=timezone.utc
+                    ).isoformat()
+                except Exception:
+                    pub = pub
+                # Age filter — 60 days (candidate news cycles slower than wire)
+                try:
+                    from datetime import datetime as _dt
+                    age_h = (datetime.now(timezone.utc) -
+                             _dt.fromisoformat(pub)).total_seconds() / 3600
+                    if age_h > 180 * 24:  # 4320h = 180 days (6 months)
+                        continue
+                except Exception:
+                    pass
+                # Tag to whichever candidate name appears in title (case-insensitive)
+                title_l = title.lower()
+                tagged  = False
+                for name in names:
+                    # Match on last name or full name
+                    parts = [p.lower() for p in name.replace("Dr. ","").split() if len(p) > 3]
+                    if any(p in title_l for p in parts):
+                        article = {"title": title, "url": link, "pub": pub,
+                                   "source": "Google News", "ac": ac_label}
+                        with lock:
+                            result.setdefault(name, []).append(article)
+                        tagged = True
+                # If no specific name match, attach to AC — only first candidate as sentinel
+                # so the AC still shows up in the result even without named mentions
+                if not tagged and len(title) > 10:
+                    article = {"title": title, "url": link, "pub": pub,
+                               "source": "Google News", "ac": ac_label}
+                    with lock:
+                        result.setdefault(names[0], []).append(article)
+        except Exception as e:
+            print(f"  [figures-news] {ac_label} error: {e}")
+
+    threads = [threading.Thread(target=_fetch_ac, args=(ac, names, url), daemon=True)
+               for ac, names, url in FIGURE_AC_FEEDS]
+    for t in threads: t.start()
+    for t in threads: t.join(timeout=20)
+
+    # Keep only latest 3 articles per candidate, sorted newest first
+    def _ts(a):
+        try: return datetime.fromisoformat(a["pub"]).timestamp()
+        except: return 0
+    for name in result:
+        result[name] = sorted(result[name], key=_ts, reverse=True)[:3]
+
+    _FIGURES_NEWS_CACHE = {"ts": time.time(), "data": result}
+    return result
+
 # ── Political figures to monitor for feed mentions ───────────────────────────
 # Updated March 2026 — all declared 2026 candidates for Bankura district ACs
 POLITICAL_FIGURES = [
@@ -469,6 +547,54 @@ def gnews(query):
 def gnews_bn(query):
     """Google News RSS — Bengali language edition (returns Bengali-language articles)."""
     return f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}&hl=bn&gl=IN&ceid=IN:bn"
+
+# ── Phase 3B: Candidate news feeds (grouped by AC, used by /api/figures-news) ─
+# One Google News query per assembly constituency — candidates ORed together.
+# 12 queries run concurrently, results tagged back to individual candidates.
+FIGURE_AC_FEEDS = [
+    # (ac_label, [candidate names], rss_url)
+    ("AC247 Saltora",
+     ["Chandana Bauri", "Uttam Bauri"],
+     gnews('"Chandana Bauri" OR "Uttam Bauri" West Bengal election 2026')),
+    ("AC248 Chhatna",
+     ["Satyanarayan Mukhopadhyay", "Swapan Kumar Mandal", "Rajib Kar"],
+     gnews('"Satyanarayan Mukhopadhyay" OR "Swapan Kumar Mandal" OR "Rajib Kar" West Bengal 2026')),
+    ("AC249 Ranibandh",
+     ["Kshudiram Tudu", "Dr. Tanushree Hansda", "Debalina Hembram"],
+     gnews('"Kshudiram Tudu" OR "Tanushree Hansda" OR "Debalina Hembram" West Bengal election 2026')),
+    ("AC250 Raipur",
+     ["Kshetra Mohan Hansda", "Thakur Moni Soren"],
+     gnews('"Kshetra Mohan Hansda" OR "Thakur Moni Soren" West Bengal election 2026')),
+    ("AC251 Taldangra",
+     ["Souvik Patra", "Falguni Singhababu"],
+     gnews('"Souvik Patra" OR "Falguni Singhababu" West Bengal election 2026')),
+    ("AC252 Bankura",
+     ["Niladri Sekhar Dana", "Dr. Anup Mondal", "Abhayananda Mukherjee"],
+     gnews('"Niladri Sekhar Dana" OR "Anup Mondal" OR "Abhayananda Mukherjee" Bankura election 2026')),
+    ("AC253 Barjora",
+     ["Billeshwar Singha", "Goutam Mishra", "Sujit Chakraborty"],
+     gnews('"Billeshwar Singha" OR "Goutam Mishra" OR "Sujit Chakraborty" Barjora election 2026')),
+    ("AC254 Onda",
+     ["Amarnath Shakha", "Subrata Dutta"],
+     gnews('"Amarnath Shakha" OR "Subrata Dutta" Onda West Bengal election 2026')),
+    ("AC255 Bishnupur",
+     ["Viswajit Khan", "Tanmoy Ghosh"],
+     gnews('"Viswajit Khan" OR "Tanmoy Ghosh" Bishnupur election 2026')),
+    ("AC256 Kotulpur",
+     ["Laxmikanta Majumdar", "Harakali Pratihar", "Ramchandra Roy"],
+     gnews('"Laxmikanta Majumdar" OR "Harakali Pratihar" OR "Ramchandra Roy" Kotulpur election 2026')),
+    ("AC257 Indas",
+     ["Nirmal Kumar Dhara", "Shyamali Roy Bagdi", "Mona Mallick"],
+     gnews('"Nirmal Kumar Dhara" OR "Shyamali Roy Bagdi" OR "Mona Mallick" Indas election 2026')),
+    ("AC258 Sonamukhi",
+     ["Dibakar Gharami", "Dr. Kallol Saha", "Ajit Roy"],
+     gnews('"Dibakar Gharami" OR "Kallol Saha" OR "Ajit Roy" Sonamukhi election 2026')),
+    # Key district leaders — separate query
+    ("Leaders",
+     ["Saumitra Khan", "Arup Chakraborty", "Dr. Subhas Sarkar", "Basudeb Acharia"],
+     gnews('"Saumitra Khan" OR "Subhas Sarkar" OR "Arup Chakraborty" OR "Basudeb Acharia" Bankura West Bengal 2026')),
+]
+_FIGURES_NEWS_CACHE = {"ts": 0.0, "data": {}}  # {candidate_name: [articles]}
 
 # ── Wire agency feeds (WB-scoped, used by /api/wire) ─────────────────────────
 # ANI: site:aninews.in returns Google-cached stale articles (100–40000h old)
@@ -1613,6 +1739,19 @@ class Handler(BaseHTTPRequestHandler):
             self._cors(); self.end_headers()
             self.wfile.write(body)
 
+        elif path == "/api/figures-news":
+            # GET /api/figures-news — per-candidate Google News (cached 15 min)
+            try:
+                data = _fetch_figures_news()
+            except Exception as e:
+                print(f"  [figures-news] ERROR: {e}")
+                data = {}
+            body = json.dumps({"figures": data, "count": len(data)}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self._cors(); self.end_headers()
+            self.wfile.write(body)
+
         elif path == "/api/digest/redigest":
             # POST-like GET: /api/digest/redigest?id=N  — re-queue a failed/done article
             if FEATURE_SQLITE and "?" in self.path:
@@ -1933,6 +2072,25 @@ def main():
             except Exception as e:
                 print(f"  [wire] Background refresh failed: {e}")
     threading.Thread(target=_wire_refresh_loop, daemon=True, name="wire-refresh").start()
+
+    # Phase 3B: pre-warm figures-news cache, then refresh every 14 min (TTL=15 min)
+    def _figures_refresh_loop():
+        import time as _t
+        try:
+            _fetch_figures_news()
+            print("  [figures-news] Cache pre-warmed")
+        except Exception as e:
+            print(f"  [figures-news] Pre-warm failed: {e}")
+        while True:
+            _t.sleep(14 * 60)
+            try:
+                global _FIGURES_NEWS_CACHE
+                _FIGURES_NEWS_CACHE["ts"] = 0.0
+                _fetch_figures_news()
+                print("  [figures-news] Background cache refreshed")
+            except Exception as e:
+                print(f"  [figures-news] Background refresh failed: {e}")
+    threading.Thread(target=_figures_refresh_loop, daemon=True, name="figures-refresh").start()
 
 
     server = QuietHTTPServer(("127.0.0.1", port), Handler)
