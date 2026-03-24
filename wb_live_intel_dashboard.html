@@ -6,6 +6,8 @@
 <title>WB Election Intel Dashboard — Bankura 2026</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <style>
 :root{
   --bg:#f1f5f9;--bg2:#ffffff;--bg3:#f8fafc;--bg4:#e8eef6;
@@ -294,6 +296,40 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 .empty-state{padding:32px;text-align:center;color:var(--text3);font-size:13px}
 .empty-icon{font-size:28px;margin-bottom:8px;display:block}
 
+/* ── TURNOUT ROW (Phase 3C) ── */
+.turnout-row{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:10px}
+.turnout-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;position:relative}
+.turnout-district{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.turnout-pct{font-size:22px;font-weight:700;font-family:'JetBrains Mono',monospace;line-height:1;color:var(--accent2)}
+.turnout-pct.high{color:#22c55e}.turnout-pct.med{color:#f59e0b}.turnout-pct.low{color:var(--text3)}
+.turnout-bar-wrap{background:var(--bg3);border-radius:3px;height:4px;margin-top:6px;overflow:hidden}
+.turnout-bar{height:4px;border-radius:3px;background:var(--accent2);transition:width .4s}
+.turnout-src{font-size:9px;color:var(--text3);margin-top:4px;font-family:'JetBrains Mono',monospace}
+.turnout-chart-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;grid-column:1/-1}
+.turnout-chart-wrap{position:relative;height:110px}
+
+/* ── MAP PANEL (Phase 4) ── */
+.map-panel{background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:10px}
+.map-panel-header{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;user-select:none}
+.map-panel-title{font-size:12px;font-weight:600;flex:1;color:var(--text)}
+.map-panel-meta{font-size:10px;color:var(--text3);font-family:'JetBrains Mono',monospace}
+.map-panel-toggle{font-size:11px;color:var(--text3);background:none;border:none;cursor:pointer;padding:0 4px}
+#bankuraMap{height:340px;width:100%;background:var(--bg3)}
+/* Leaflet dark-mode overrides */
+[data-theme="dark"] .leaflet-tile{filter:brightness(.75) invert(1) contrast(3) hue-rotate(200deg) saturate(.3) brightness(.7)}
+[data-theme="dark"] .leaflet-container{background:#1e293b}
+/* AC popup */
+.ac-popup h4{margin:0 0 6px;font-size:13px;font-family:'JetBrains Mono',monospace}
+.ac-popup .threat-badge{display:inline-block;padding:1px 7px;border-radius:4px;font-size:10px;font-weight:700;margin-left:6px}
+.ac-popup .stat-row{font-size:11px;color:#64748b;margin-bottom:4px}
+.ac-popup .fig-row{font-size:11px;margin-top:6px;padding-top:6px;border-top:1px solid #e2e8f0}
+/* AC pulse animation for HIGH/CRITICAL */
+@keyframes acPulse{0%{opacity:.7}50%{opacity:1}100%{opacity:.7}}
+.ac-pulse{animation:acPulse 1.8s ease-in-out infinite}
+/* Legend */
+.map-legend{position:absolute;bottom:18px;right:10px;z-index:1000;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:10px;font-family:'JetBrains Mono',monospace;line-height:1.8}
+.map-legend-dot{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:middle}
+
 /* ── CHARTS ROW ── */
 .charts-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .chart-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
@@ -519,6 +555,30 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
       </div>
     </div>
 
+    <!-- TURNOUT MANUAL ENTRY (shown in election day mode) -->
+    <div class="sidebar-section" id="turnoutManualSection" style="display:none">
+      <div class="sid-label">🗳️ Manual Turnout Entry</div>
+      <div style="font-size:10px;color:var(--text3);margin-bottom:6px">Enter official turnout % heard from polling officials.</div>
+      <select id="turnoutDistrict" style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:5px 6px;font-size:11px;margin-bottom:5px">
+        <option value="Bankura">Bankura</option>
+        <option value="Purulia">Purulia</option>
+        <option value="Jhargram">Jhargram</option>
+        <option value="Paschim Bardhaman">Paschim Bardhaman</option>
+        <option value="Paschim Medinipur">Paschim Medinipur</option>
+        <option value="Birbhum">Birbhum</option>
+      </select>
+      <div style="display:flex;gap:5px;margin-bottom:5px">
+        <input type="number" id="turnoutPct" min="0" max="100" step="0.1" placeholder="Turnout %"
+          style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:5px 6px;font-size:11px">
+        <input type="number" id="turnoutBooths" min="0" placeholder="Booths rptd"
+          style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:5px 6px;font-size:11px">
+      </div>
+      <button class="ctrl-btn primary" onclick="submitManualTurnout()" style="font-size:11px;padding:6px 10px">
+        <span class="btn-icon">✓</span> Submit
+      </button>
+      <div id="turnoutManualStatus" style="font-size:10px;color:var(--green2);margin-top:4px;min-height:14px"></div>
+    </div>
+
     <!-- ARTICLE DIGEST -->
     <div class="sidebar-section">
       <div class="sid-label">Article Digest</div>
@@ -583,6 +643,39 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
         <div class="metric-val" id="mThreat" style="color:var(--green2)">—</div>
         <div class="metric-lbl">Overall threat level</div>
         <div class="metric-trend" id="mThreatTrend">—</div>
+      </div>
+    </div>
+
+    <!-- TURNOUT ROW (Phase 3C — hidden until election day mode) -->
+    <div id="turnoutSection" style="display:none">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <span style="font-size:13px;font-weight:600;color:var(--text)">🗳️ Voter Turnout — WB Phase 1</span>
+        <span id="turnoutLiveTag" style="font-size:9px;font-weight:700;letter-spacing:.07em;background:#dc2626;color:#fff;border-radius:4px;padding:2px 7px">LIVE</span>
+        <span id="turnoutUpdatedAt" style="font-size:10px;color:var(--text3);font-family:'JetBrains Mono',monospace;margin-left:4px"></span>
+        <button onclick="loadTurnout()" style="margin-left:auto;background:var(--bg3);border:1px solid var(--border);color:var(--text3);border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer" title="Refresh turnout data">↻ Refresh</button>
+      </div>
+      <div class="turnout-row" id="turnoutRow">
+        <!-- filled by renderTurnout() -->
+      </div>
+      <div class="turnout-chart-card" id="turnoutChartCard" style="display:none">
+        <div class="chart-title">Bankura Turnout % — election day trend</div>
+        <div class="turnout-chart-wrap">
+          <canvas id="chartTurnout"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- MAP PANEL (Phase 4) -->
+    <div class="map-panel" id="mapPanel">
+      <div class="map-panel-header" onclick="toggleMapPanel()">
+        <span style="font-size:14px">🗺️</span>
+        <span class="map-panel-title">Bankura District — Assembly Constituency Map</span>
+        <span class="map-panel-meta" id="mapModeBadge">THREAT MODE</span>
+        <span class="map-panel-meta" id="mapLastUpdate" style="margin-left:8px"></span>
+        <button class="map-panel-toggle" id="mapToggleBtn" title="Collapse map">▴</button>
+      </div>
+      <div id="mapBody">
+        <div id="bankuraMap"></div>
       </div>
     </div>
 
@@ -1317,6 +1410,23 @@ async function runFetch(manual){
 
     document.getElementById('lastRunTime').textContent = ts;
     currentParsed = parsed;
+    window._lastParsed = parsed;   // map popup needs this
+
+    /* ── Phase 4: update map layer ── */
+    if(parsed.acMetrics){
+      updateMapLayer(parsed.acMetrics);
+      _autoShowMap(parsed.acMetrics);
+    }
+    if(isElectionMode && parsed.acMetrics){
+      var today = new Date().toISOString().slice(0,10);
+      if(today === '2026-04-23'){
+        fetch('/api/turnout').then(function(r){return r.json();}).then(function(d){
+          updateMapTurnout(d.districts||{});
+          updateMapModeBadge();
+        }).catch(function(){});
+      }
+    }
+
     pushCycle(ts, parsed);
     setStatus('LIVE','#4ade80');
     _fetchInFlight = false;
@@ -2155,6 +2265,433 @@ function generateVideoHTML(){
 document.getElementById('progressBar').style.width='0%';
 initCharts();
 
+/* ═══════ PHASE 3C — ECI VOTER TURNOUT TRACKER ═══════ */
+
+var _chartTurnout = null;
+var _turnoutFetchTimer = null;
+var TURNOUT_REFRESH_MS = 10 * 60 * 1000;   // 10 min
+
+/* Show/hide the entire turnout section based on election day mode */
+function setTurnoutVisibility(show){
+  var sec  = document.getElementById('turnoutSection');
+  var msec = document.getElementById('turnoutManualSection');
+  if(sec)  sec.style.display  = show ? '' : 'none';
+  if(msec) msec.style.display = show ? '' : 'none';
+  if(show){
+    loadTurnout();
+    if(!_turnoutFetchTimer)
+      _turnoutFetchTimer = setInterval(loadTurnout, TURNOUT_REFRESH_MS);
+  } else {
+    if(_turnoutFetchTimer){ clearInterval(_turnoutFetchTimer); _turnoutFetchTimer = null; }
+  }
+}
+
+/* Fetch turnout data from proxy and render */
+function loadTurnout(){
+  fetch('/api/turnout')
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      renderTurnout(data.districts || {});
+      updateTurnoutChart(data.history || []);
+      var ua = document.getElementById('turnoutUpdatedAt');
+      if(ua) ua.textContent = 'Updated ' + new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+    })
+    .catch(function(e){ console.warn('[turnout] fetch failed', e); });
+}
+
+/* Render district cards */
+function renderTurnout(districts){
+  var row = document.getElementById('turnoutRow');
+  if(!row) return;
+  var districtOrder = ['Bankura','Purulia','Jhargram','Paschim Bardhaman','Paschim Medinipur','Birbhum'];
+  row.innerHTML = '';
+  var anyData = false;
+  districtOrder.forEach(function(d){
+    var info = districts[d] || null;
+    var pct  = info ? info.pct : null;
+    var src  = info ? (info.source || '') : '';
+    var cls  = pct === null ? '' : (pct >= 65 ? 'high' : pct >= 45 ? 'med' : 'low');
+    var barW = pct !== null ? Math.min(100, pct).toFixed(1) : 0;
+    var srcLabel = src === 'eci_scrape' ? 'ECI' : src === 'rss_parse' ? 'News' : src === 'manual' ? 'Manual' : src === 'db_cache' ? 'Cached' : '—';
+    var shortName = d.replace('Paschim ','P. ');
+    row.innerHTML += '<div class="turnout-card">'
+      + '<div class="turnout-district">' + shortName + '</div>'
+      + '<div class="turnout-pct ' + cls + '">' + (pct !== null ? pct.toFixed(1) + '%' : '—') + '</div>'
+      + '<div class="turnout-bar-wrap"><div class="turnout-bar" style="width:' + barW + '%"></div></div>'
+      + '<div class="turnout-src">' + srcLabel + '</div>'
+      + '</div>';
+    if(pct !== null) anyData = true;
+  });
+  /* Show LIVE tag only if data exists and today is election day */
+  var tag = document.getElementById('turnoutLiveTag');
+  if(tag){
+    var today = new Date().toISOString().slice(0,10);
+    tag.style.display = (anyData && today === '2026-04-23') ? '' : 'none';
+    if(today !== '2026-04-23' && anyData) tag.style.display = 'none';
+  }
+}
+
+/* Turnout trend chart (Bankura, election day only) */
+function updateTurnoutChart(history){
+  var card = document.getElementById('turnoutChartCard');
+  if(!history || history.length < 2){ if(card) card.style.display='none'; return; }
+  if(card) card.style.display = '';
+
+  var labels = history.map(function(h){
+    var d = new Date(h.ts);
+    return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+  });
+  var vals = history.map(function(h){ return h.pct; });
+
+  var el = document.getElementById('chartTurnout');
+  if(!el) return;
+
+  if(_chartTurnout){
+    _chartTurnout.data.labels = labels;
+    _chartTurnout.data.datasets[0].data = vals;
+    _chartTurnout.update('none');
+    return;
+  }
+  _chartTurnout = new Chart(el.getContext('2d'),{
+    type:'line',
+    data:{
+      labels: labels,
+      datasets:[{
+        label:'Bankura turnout %',
+        data: vals,
+        borderColor:'#3b82f6',
+        backgroundColor:'rgba(59,130,246,.12)',
+        borderWidth:2,
+        pointRadius:3,
+        fill:true,
+        tension:.3,
+      }]
+    },
+    options:{
+      animation:false,
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false}},
+      scales:{
+        x:{ticks:{font:{size:9},color:'#64748b',maxRotation:0,maxTicksLimit:8}},
+        y:{min:0,max:100,ticks:{font:{size:9},color:'#64748b',callback:function(v){return v+'%';}}},
+      }
+    }
+  });
+}
+
+/* Manual turnout submission */
+function submitManualTurnout(){
+  var district = document.getElementById('turnoutDistrict').value;
+  var pct      = parseFloat(document.getElementById('turnoutPct').value);
+  var booths   = parseInt(document.getElementById('turnoutBooths').value) || null;
+  var status   = document.getElementById('turnoutManualStatus');
+
+  if(!district || isNaN(pct) || pct < 0 || pct > 100){
+    if(status) status.textContent = 'Enter a valid district and % (0–100)';
+    return;
+  }
+  if(status) status.textContent = 'Saving…';
+  fetch('/api/turnout', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({district:district, pct:pct, booths_reported:booths})
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(data){
+    if(data.ok){
+      renderTurnout(data.districts || {});
+      if(status) status.textContent = '✓ Saved for ' + district;
+      document.getElementById('turnoutPct').value = '';
+      document.getElementById('turnoutBooths').value = '';
+      setTimeout(function(){ if(status) status.textContent=''; }, 3000);
+    } else {
+      if(status) status.textContent = 'Error: ' + (data.error || 'unknown');
+    }
+  })
+  .catch(function(e){
+    if(status) status.textContent = 'Network error';
+  });
+}
+
+/* Election day auto-activation — check date on page load */
+document.addEventListener('DOMContentLoaded', function(){
+  var today = new Date().toISOString().slice(0,10);
+  if(today === '2026-04-23'){
+    /* Auto-enable election day mode */
+    if(!isElectionMode) toggleMode();
+    setTurnoutVisibility(true);
+    console.log('[turnout] Election day detected — turnout tracker activated');
+  }
+});
+
+/* Hook into toggleMode so turnout section follows election mode */
+(function(){
+  var _origToggle = window.toggleMode;
+  window.toggleMode = function(){
+    _origToggle();
+    setTurnoutVisibility(isElectionMode);
+  };
+})();
+
+/* ═══════ PHASE 4 — BANKURA AC MAP OVERLAY ═══════ */
+
+var _map          = null;
+var _mapGeoLayer  = null;
+var _mapCollapsed = true;   // starts minimised; auto-expands on AC threat
+var _mapGeoJSON   = null;   // cached GeoJSON
+
+/* Colour map: threat → fill colour */
+var _threatColor = {
+  CRITICAL: '#dc2626',
+  HIGH:     '#f97316',
+  MODERATE: '#f59e0b',
+  LOW:      '#22c55e',
+};
+var _threatOpacity = { CRITICAL:.75, HIGH:.6, MODERATE:.45, LOW:.2 };
+
+function initMap(){
+  if(_map) return;
+  var el = document.getElementById('bankuraMap');
+  if(!el) return;
+
+  _map = L.map('bankuraMap', {
+    zoomControl: true,
+    attributionControl: false,
+    scrollWheelZoom: true,
+  });
+
+  // CartoDB Positron tile layer — clean, minimal, works offline-friendly
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    maxZoom: 13,
+    subdomains: 'abcd',
+  }).addTo(_map);
+
+  // Attribution (compact)
+  L.control.attribution({position:'bottomleft', prefix:false})
+    .addAttribution('© OpenStreetMap · CartoDB · Datameet')
+    .addTo(_map);
+
+  // Legend
+  var legend = L.control({position:'bottomright'});
+  legend.onAdd = function(){
+    var div = L.DomUtil.create('div','map-legend');
+    div.innerHTML =
+      '<strong style="font-size:10px">Threat Level</strong><br>' +
+      ['CRITICAL','HIGH','MODERATE','LOW'].map(function(t){
+        return '<span class="map-legend-dot" style="background:'+_threatColor[t]+'"></span>'+t;
+      }).join('<br>');
+    return div;
+  };
+  legend.addTo(_map);
+
+  // Load GeoJSON
+  fetch('/geojson/bankura_acs.geojson')
+    .then(function(r){ return r.json(); })
+    .then(function(geo){
+      _mapGeoJSON = geo;
+      _mapGeoLayer = L.geoJSON(geo, {
+        style: _defaultACStyle,
+        onEachFeature: _onEachAC,
+      }).addTo(_map);
+      _map.fitBounds(_mapGeoLayer.getBounds(), {padding:[10,10]});
+      _addACLabels(geo);
+      console.log('[map] Bankura AC layer loaded');
+    })
+    .catch(function(e){ console.warn('[map] GeoJSON load failed', e); });
+}
+
+function _defaultACStyle(feature){
+  return {
+    fillColor:   _threatColor['LOW'],
+    fillOpacity: _threatOpacity['LOW'],
+    color:       '#64748b',
+    weight:      1.2,
+    opacity:     0.9,
+  };
+}
+
+function _onEachAC(feature, layer){
+  layer.on({
+    mouseover: function(e){
+      e.target.setStyle({weight:2.5, color:'#1d4ed8', fillOpacity: Math.min(1, (e.target.options.fillOpacity||.2)+.15)});
+    },
+    mouseout: function(e){
+      _mapGeoLayer.resetStyle(e.target);
+    },
+    click: function(e){
+      _showACPopup(feature.properties, e.target);
+    },
+  });
+}
+
+function _addACLabels(geo){
+  geo.features.forEach(function(ft){
+    var p   = ft.properties;
+    var lon = p.CENTER[0], lat = p.CENTER[1];
+    var lbl = p.DISPLAY_NAME + (p.CATEGORY ? '<br><span style="font-size:8px;opacity:.7">'+p.CATEGORY+'</span>' : '');
+    L.marker([lat, lon], {
+      icon: L.divIcon({
+        className: '',
+        html: '<div style="font-size:9px;font-weight:600;color:#1e293b;text-shadow:0 0 3px #fff,0 0 3px #fff;text-align:center;white-space:nowrap;pointer-events:none">'+lbl+'</div>',
+        iconAnchor: [30, 8],
+        iconSize:   [60, 16],
+      }),
+      interactive: false,
+    }).addTo(_map);
+  });
+}
+
+function updateMapLayer(acMetrics){
+  if(!_mapGeoLayer || !acMetrics) return;
+  _mapGeoLayer.eachLayer(function(layer){
+    var name    = layer.feature.properties.AC_NAME;
+    var metrics = acMetrics[name];
+    if(!metrics) return;
+    var threat  = metrics.threat || 'LOW';
+    layer.setStyle({
+      fillColor:   _threatColor[threat]  || _threatColor['LOW'],
+      fillOpacity: _threatOpacity[threat]|| _threatOpacity['LOW'],
+    });
+    // Store for mouseout reset
+    layer.options._baseFillColor   = _threatColor[threat];
+    layer.options._baseFillOpacity = _threatOpacity[threat];
+  });
+  var now = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+  var el  = document.getElementById('mapLastUpdate');
+  if(el) el.textContent = 'Updated ' + now;
+}
+
+function _showACPopup(props, layer){
+  var name    = props.AC_NAME;
+  var display = props.DISPLAY_NAME + (props.CATEGORY ? ' ' + props.CATEGORY : '');
+  var metrics = (window._lastParsed && window._lastParsed.acMetrics) ? window._lastParsed.acMetrics[name] : null;
+  var threat  = metrics ? metrics.threat : 'NO DATA';
+  var tColor  = _threatColor[threat] || '#64748b';
+  var high    = metrics ? metrics.high    : '—';
+  var med     = metrics ? metrics.medium  : '—';
+  var figs    = metrics ? metrics.figures : '—';
+
+  // Find matching figures for this AC
+  var figList = '';
+  if(window._lastParsed && window._lastParsed.figureMentions){
+    var acKw = name.replace(' (SC)','').replace(' (ST)','').toLowerCase();
+    window._lastParsed.figureMentions.forEach(function(f){
+      if(f.count > 0 && f.role.toLowerCase().indexOf(acKw) !== -1){
+        var partyColor = f.party === 'BJP' ? '#f97316' : f.party === 'TMC' ? '#22c55e' : '#ef4444';
+        figList += '<div style="font-size:11px;margin-top:3px"><span style="color:'+partyColor+';font-weight:600">'+f.party+'</span> '+f.name+' <span style="color:#94a3b8">('+f.count+' mentions)</span></div>';
+      }
+    });
+  }
+
+  var html = '<div class="ac-popup">'
+    + '<h4>'+display
+    + '<span class="threat-badge" style="background:'+tColor+'22;color:'+tColor+';border:1px solid '+tColor+'44">'+threat+'</span>'
+    + '</h4>'
+    + '<div class="stat-row">🔴 HIGH signals: <strong>'+high+'</strong> &nbsp;|&nbsp; 🟡 MEDIUM: <strong>'+med+'</strong></div>'
+    + '<div class="stat-row">👤 Figure mentions: <strong>'+figs+'</strong></div>'
+    + (figList ? '<div class="fig-row">'+figList+'</div>' : '')
+    + '</div>';
+
+  L.popup({maxWidth:260, className:'ac-popup-wrap'})
+    .setLatLng(layer.getBounds().getCenter())
+    .setContent(html)
+    .openOn(_map);
+}
+
+function toggleMapPanel(){
+  _mapCollapsed = !_mapCollapsed;
+  _applyMapCollapse();
+  localStorage.setItem('wb_map_collapsed', _mapCollapsed ? '1' : '0');
+}
+
+function _applyMapCollapse(){
+  var body = document.getElementById('mapBody');
+  var btn  = document.getElementById('mapToggleBtn');
+  if(body) body.style.display = _mapCollapsed ? 'none' : '';
+  if(btn)  btn.textContent    = _mapCollapsed ? '▾' : '▴';
+  if(!_mapCollapsed && _map) setTimeout(function(){ _map.invalidateSize(); }, 50);
+}
+
+/* Auto-expand map if any AC has MODERATE/HIGH/CRITICAL threat.
+   Only expands — never auto-collapses (user controls that). */
+function _autoShowMap(acMetrics){
+  if(!_mapCollapsed) return;   // already open
+  if(!acMetrics) return;
+  var elevated = Object.values(acMetrics).some(function(v){
+    return v.threat === 'MODERATE' || v.threat === 'HIGH' || v.threat === 'CRITICAL';
+  });
+  if(elevated){
+    _mapCollapsed = false;
+    _applyMapCollapse();
+    localStorage.setItem('wb_map_collapsed','0');
+    console.log('[map] Auto-expanded: AC threat detected');
+  }
+}
+
+/* Update map mode badge when election day mode toggled */
+function updateMapModeBadge(){
+  var badge = document.getElementById('mapModeBadge');
+  if(!badge) return;
+  var today = new Date().toISOString().slice(0,10);
+  if(isElectionMode && today === '2026-04-23'){
+    badge.textContent = 'TURNOUT MODE';
+    badge.style.color = '#22c55e';
+  } else {
+    badge.textContent = 'THREAT MODE';
+    badge.style.color = '';
+  }
+}
+
+/* Election day: overlay turnout % as fill gradient on the map */
+function updateMapTurnout(turnoutData){
+  if(!_mapGeoLayer || !turnoutData) return;
+  // Map district-level turnout to a blue gradient (no AC-level data yet)
+  // Bankura district turnout → all 12 AC polygons shaded uniformly
+  var bankuraPct = (turnoutData['Bankura'] && turnoutData['Bankura'].pct) || null;
+  if(!bankuraPct) return;
+
+  // Gradient: 0% = #94a3b8 (grey), 50% = #60a5fa (blue), 80%+ = #1d4ed8 (deep blue)
+  function pctToColor(pct){
+    if(pct >= 70) return '#1d4ed8';
+    if(pct >= 55) return '#3b82f6';
+    if(pct >= 40) return '#60a5fa';
+    return '#94a3b8';
+  }
+  _mapGeoLayer.eachLayer(function(layer){
+    layer.setStyle({
+      fillColor:   pctToColor(bankuraPct),
+      fillOpacity: 0.55,
+    });
+  });
+}
+
+/* Init map on page load — wait for Leaflet CDN script to finish loading */
+document.addEventListener('DOMContentLoaded', function(){
+  // Restore collapsed state from localStorage (default: collapsed)
+  var saved = localStorage.getItem('wb_map_collapsed');
+  _mapCollapsed = (saved === null) ? true : (saved === '1');
+  _applyMapCollapse();
+
+  function tryInitMap(attempts){
+    if(typeof L !== 'undefined'){
+      initMap();
+    } else if(attempts > 0){
+      setTimeout(function(){ tryInitMap(attempts - 1); }, 300);
+    } else {
+      console.warn('[map] Leaflet still not loaded after retries');
+    }
+  }
+  tryInitMap(15);   // up to 15 × 300ms = 4.5s wait
+});
+
+/* Extend existing toggleMode hook to also update map badge */
+(function(){
+  var _origToggle = window.toggleMode;
+  window.toggleMode = function(){
+    _origToggle();
+    updateMapModeBadge();
+  };
+})();
 
 /* ── TIME WINDOW BADGES on feed headers ───────────────────────────────── */
 function addTimeBadge(panelId,label,color){

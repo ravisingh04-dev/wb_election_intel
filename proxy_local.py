@@ -83,6 +83,17 @@ def _db_init():
                 violence_reports INTEGER,
                 full_json        TEXT
             );
+            CREATE TABLE IF NOT EXISTS turnout_snapshots (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                recorded_at     TEXT,
+                district        TEXT,
+                turnout_pct     REAL,
+                booths_total    INTEGER,
+                booths_reported INTEGER,
+                source          TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_ts_district
+                ON turnout_snapshots(district, recorded_at);
         """)
         c.commit(); c.close()
     print(f"  [DB] Initialised: {DB_PATH}")
@@ -1549,6 +1560,9 @@ def inject_news_into_payload(payload_dict):
     print(f"  Figure monitor: {mentioned}/{len(POLITICAL_FIGURES)} figures mentioned in feeds")
     pre_built["figureMentions"] = figure_mentions
 
+    # ── Phase 4: per-AC threat metrics for map overlay ────────────────────────
+    pre_built["acMetrics"] = _build_ac_metrics(panel_items, figure_mentions)
+
     # ── Phase 2: queue new MED/HIGH articles for background digesting ──────────
     _save_digest_candidates(panel_items)
 
@@ -1632,6 +1646,285 @@ def inject_news_into_payload(payload_dict):
     payload_dict["max_tokens"] = 1400   # analysis (~700) + bangla_translations 6×~40tok (~240) + headroom
 
     return payload_dict
+
+
+# ── Phase 4: Per-AC threat metrics for map overlay ───────────────────────────
+
+# Keywords per AC — used to tag feed items to a specific constituency
+_AC_KEYWORDS = {
+    "SALTORA (SC)":    ["saltora"],
+    "CHHATNA":         ["chhatna"],
+    "RANIBANDH (ST)":  ["ranibandh", "raniband"],
+    "RAIPUR (ST)":     ["raipur"],
+    "TALDANGRA":       ["taldangra", "tal dangra"],
+    "BANKURA":         ["bankura sadar", "bankura town", "bankura municipality",
+                        "bankura constituency"],
+    "BARJORA":         ["barjora", "bar jora"],
+    "ONDA":            ["onda"],
+    "BISHNUPUR":       ["bishnupur"],
+    "KOTULPUR (SC)":   ["kotulpur", "katulpur"],
+    "INDAS (SC)":      ["indas", "indus"],
+    "SONAMUKHI (SC)":  ["sonamukhi", "sonamukhi"],
+}
+
+# Map AC name → figure names for mention counting
+# Built dynamically from POLITICAL_FIGURES at call time
+
+
+def _build_ac_metrics(panel_items, figure_mentions):
+    """
+    Scan all feed items and figure mentions to produce per-AC threat metrics.
+    Returns dict keyed by AC_NAME matching the GeoJSON properties.
+    """
+    # Build AC → figure name mapping from POLITICAL_FIGURES
+    ac_figures = {ac: [] for ac in _AC_KEYWORDS}
+    for fig in POLITICAL_FIGURES:
+        role = fig.get("role", "").upper()
+        for ac in _AC_KEYWORDS:
+            bare = ac.replace(" (SC)","").replace(" (ST)","")
+            if bare in role or any(kw.upper() in role for kw in _AC_KEYWORDS[ac]):
+                ac_figures[ac].append(fig["name"])
+
+    # Count figure mentions per AC
+    fig_mention_map = {f["name"]: f["count"] for f in figure_mentions}
+
+    # Flatten all WB panel items
+    all_items = []
+    for panel in ["bankura","surrounds","statewide","alerts","official","parties","bangla"]:
+        all_items.extend(panel_items.get(panel, []))
+
+    result = {}
+    for ac, kws in _AC_KEYWORDS.items():
+        high_count = medium_count = 0
+        for it in all_items:
+            text = (it.get("title","") + " " + it.get("desc","")).lower()
+            if any(kw in text for kw in kws):
+                sev = _score_severity(it.get("title","") + " " + it.get("desc",""))
+                if sev == "high":   high_count   += 1
+                elif sev == "medium": medium_count += 1
+
+        # Count figure mentions for this AC
+        fig_count = sum(fig_mention_map.get(name, 0) for name in ac_figures.get(ac, []))
+
+        # Compute AC-level threat
+        if high_count >= 2:
+            threat = "CRITICAL"
+        elif high_count >= 1:
+            threat = "HIGH"
+        elif medium_count >= 2:
+            threat = "MODERATE"
+        else:
+            threat = "LOW"
+
+        result[ac] = {
+            "high":    high_count,
+            "medium":  medium_count,
+            "figures": fig_count,
+            "threat":  threat,
+        }
+
+    active = sum(1 for v in result.values() if v["threat"] != "LOW")
+    print(f"  [map] AC metrics: {active}/12 ACs with elevated threat")
+    return result
+
+
+# ── Phase 3C: ECI Voter Turnout Tracker ──────────────────────────────────────
+
+# Districts in WB Phase 1 (Bankura observer covers all of these)
+_TURNOUT_DISTRICTS = [
+    "Bankura", "Purulia", "Jhargram",
+    "Paschim Bardhaman", "Paschim Medinipur", "Birbhum",
+]
+
+_turnout_cache = {"ts": 0.0, "data": {}}   # 10-min cache
+
+def fetch_turnout_data():
+    """
+    Fetch voter turnout percentages for WB Phase 1 districts.
+
+    Strategy (tries each in order, stops at first success):
+    1. Scrape ECI voter turnout page (election day only)
+    2. Parse turnout mentions from Google News RSS
+    3. Return last known DB values if both fail
+    """
+    global _turnout_cache
+    if time.time() - _turnout_cache["ts"] < 600:
+        return _turnout_cache["data"]
+
+    result = _scrape_eci_turnout() or _parse_turnout_from_rss()
+
+    if result:
+        _turnout_cache = {"ts": time.time(), "data": result}
+        _save_turnout_snapshot(result)
+    else:
+        # Fall back to last DB snapshot per district
+        result = _load_last_turnout_from_db()
+        if result:
+            _turnout_cache = {"ts": time.time(), "data": result}
+
+    return result or {}
+
+
+def _scrape_eci_turnout():
+    """
+    Scrape ECI voter turnout app page for WB Phase 1 data.
+    Only runs on election day (23 Apr 2026) to avoid wasted requests.
+    Returns {district: {"pct": float, "source": "eci_scrape"}} or None.
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    if today != "2026-04-23":
+        return None
+
+    urls_to_try = [
+        "https://results.eci.gov.in/AcResultGenJune2024/voterturnout.htm",
+        "https://www.eci.gov.in/voter-turnout",
+    ]
+    district_patterns = {
+        "Bankura":           r"bankura[^\d]*?([\d.]+)\s*%",
+        "Purulia":           r"purulia[^\d]*?([\d.]+)\s*%",
+        "Jhargram":          r"jhargram[^\d]*?([\d.]+)\s*%",
+        "Paschim Bardhaman": r"(?:paschim bardhaman|west burdwan)[^\d]*?([\d.]+)\s*%",
+        "Paschim Medinipur": r"(?:paschim medinipur|west midnapore)[^\d]*?([\d.]+)\s*%",
+        "Birbhum":           r"birbhum[^\d]*?([\d.]+)\s*%",
+    }
+    ua = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+    for url in urls_to_try:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": ua})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                html = resp.read(300_000).decode("utf-8", errors="replace").lower()
+            found = {}
+            for district, pattern in district_patterns.items():
+                m = re.search(pattern, html, re.I)
+                if m:
+                    found[district] = {"pct": float(m.group(1)), "source": "eci_scrape"}
+            if found:
+                print(f"  [turnout] ECI scrape: {len(found)} districts found")
+                return found
+        except Exception as e:
+            print(f"  [turnout] ECI scrape failed ({url}): {e}")
+    return None
+
+
+def _parse_turnout_from_rss():
+    """
+    Parse voter turnout percentages from Google News RSS headlines.
+    Looks for patterns like "Bankura records 68% voter turnout".
+    Returns {district: {"pct": float, "source": "rss_parse"}} or None.
+    """
+    RSS_TURNOUT = [
+        "https://news.google.com/rss/search?q=west+bengal+voter+turnout+2026&hl=en-IN&gl=IN&ceid=IN:en",
+        "https://news.google.com/rss/search?q=bankura+purulia+voter+turnout+phase+1&hl=en-IN&gl=IN&ceid=IN:en",
+    ]
+    ua = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+    district_kw = {
+        "Bankura":           ["bankura"],
+        "Purulia":           ["purulia"],
+        "Jhargram":          ["jhargram"],
+        "Paschim Bardhaman": ["paschim bardhaman", "west burdwan", "bardhaman"],
+        "Paschim Medinipur": ["paschim medinipur", "west midnapore", "medinipur"],
+        "Birbhum":           ["birbhum"],
+    }
+    pct_pattern = re.compile(r'([\d.]+)\s*(?:%|per\s*cent)', re.I)
+    found = {}
+    for rss_url in RSS_TURNOUT:
+        try:
+            req = urllib.request.Request(rss_url, headers={"User-Agent": ua})
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                xml_raw = resp.read(200_000)
+            root = ET.fromstring(xml_raw)
+            items = root.findall(".//item")
+            for item in items:
+                title = (item.findtext("title") or "").lower()
+                desc  = (item.findtext("description") or "").lower()
+                text  = title + " " + desc
+                if not any(kw in text for kw in ["turnout", "voter turn", "polled", "voted"]):
+                    continue
+                for district, keywords in district_kw.items():
+                    if district in found:
+                        continue
+                    if any(kw in text for kw in keywords):
+                        m = pct_pattern.search(text)
+                        if m:
+                            pct = float(m.group(1))
+                            if 0 < pct <= 100:
+                                found[district] = {"pct": pct, "source": "rss_parse"}
+        except Exception as e:
+            print(f"  [turnout] RSS parse error: {e}")
+    if found:
+        print(f"  [turnout] RSS parse: {len(found)} districts found")
+        return found or None
+    return None
+
+
+def _load_last_turnout_from_db():
+    """Return the most recent turnout snapshot per district from DB."""
+    if not FEATURE_SQLITE:
+        return {}
+    try:
+        with _db_lock:
+            c = _db_conn()
+            rows = c.execute("""
+                SELECT district, turnout_pct, booths_total, booths_reported,
+                       source, recorded_at
+                FROM turnout_snapshots
+                WHERE id IN (
+                    SELECT MAX(id) FROM turnout_snapshots GROUP BY district
+                )
+            """).fetchall()
+            c.close()
+        result = {}
+        for row in rows:
+            result[row["district"]] = {
+                "pct":              row["turnout_pct"],
+                "booths_total":     row["booths_total"],
+                "booths_reported":  row["booths_reported"],
+                "source":           row["source"] or "db_cache",
+                "recorded_at":      row["recorded_at"],
+            }
+        return result
+    except Exception:
+        return {}
+
+
+def _save_turnout_snapshot(data):
+    """Persist a turnout data dict to DB. data = {district: {pct, booths_total?, ...}}"""
+    if not FEATURE_SQLITE or not data:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    with _db_lock:
+        c = _db_conn()
+        for district, vals in data.items():
+            c.execute("""
+                INSERT INTO turnout_snapshots
+                  (recorded_at, district, turnout_pct, booths_total, booths_reported, source)
+                VALUES (?,?,?,?,?,?)
+            """, (
+                now, district,
+                vals.get("pct"),
+                vals.get("booths_total"),
+                vals.get("booths_reported"),
+                vals.get("source", "unknown"),
+            ))
+        c.commit(); c.close()
+    print(f"  [turnout] Saved {len(data)} district snapshot(s) to DB")
+
+
+def _save_manual_turnout(district, pct, booths_total=None, booths_reported=None):
+    """Save a manually-entered turnout value. Returns the updated full snapshot."""
+    entry = {
+        "pct":             float(pct),
+        "booths_total":    int(booths_total)    if booths_total    else None,
+        "booths_reported": int(booths_reported) if booths_reported else None,
+        "source":          "manual",
+    }
+    _save_turnout_snapshot({district: entry})
+    # Invalidate cache so next fetch returns fresh DB values
+    global _turnout_cache
+    _turnout_cache["ts"] = 0.0
+    return _load_last_turnout_from_db()
 
 
 # ── HTTP handler ──────────────────────────────────────────────────────────────
@@ -1758,6 +2051,56 @@ class Handler(BaseHTTPRequestHandler):
             self._cors(); self.end_headers()
             self.wfile.write(body)
 
+        elif path.startswith("/geojson/"):
+            # GET /geojson/<filename> — serve static GeoJSON files
+            fname = path[len("/geojson/"):]
+            # Safety: only allow simple filenames, no path traversal
+            if "/" in fname or ".." in fname:
+                self.send_error(400); return
+            geo_path = SCRIPT_DIR / "geojson" / fname
+            if geo_path.exists() and geo_path.suffix == ".geojson":
+                content = geo_path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/geo+json")
+                self._cors(); self.end_headers()
+                self.wfile.write(content)
+            else:
+                self.send_error(404)
+
+        elif path == "/api/turnout":
+            # GET /api/turnout — latest voter turnout per district
+            try:
+                data = fetch_turnout_data()
+            except Exception as e:
+                print(f"  [turnout] fetch error: {e}")
+                data = {}
+            # Also return history for trend chart (last 20 snapshots for Bankura)
+            history = []
+            if FEATURE_SQLITE:
+                try:
+                    with _db_lock:
+                        c = _db_conn()
+                        rows = c.execute("""
+                            SELECT recorded_at, district, turnout_pct
+                            FROM turnout_snapshots
+                            WHERE district='Bankura'
+                            ORDER BY recorded_at DESC LIMIT 20
+                        """).fetchall()
+                        c.close()
+                    history = [{"ts": r["recorded_at"], "pct": r["turnout_pct"]}
+                               for r in reversed(rows)]
+                except Exception:
+                    pass
+            body = json.dumps({
+                "districts": data,
+                "history":   history,
+                "districts_list": _TURNOUT_DISTRICTS,
+            }).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self._cors(); self.end_headers()
+            self.wfile.write(body)
+
         elif path == "/api/digest/redigest":
             # POST-like GET: /api/digest/redigest?id=N  — re-queue a failed/done article
             if FEATURE_SQLITE and "?" in self.path:
@@ -1845,6 +2188,29 @@ class Handler(BaseHTTPRequestHandler):
             pass  # client disconnected — normal for browser timeout
 
     def do_POST(self):
+        if self.path == "/api/turnout":
+            # POST /api/turnout — manual entry: {district, pct, booths_total?, booths_reported?}
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body   = json.loads(self.rfile.read(length))
+                district = body.get("district", "").strip()
+                pct      = float(body.get("pct", 0))
+                if district not in _TURNOUT_DISTRICTS:
+                    self._reply(400, json.dumps({"error": "unknown district"}).encode())
+                    return
+                if not (0 <= pct <= 100):
+                    self._reply(400, json.dumps({"error": "pct out of range"}).encode())
+                    return
+                updated = _save_manual_turnout(
+                    district, pct,
+                    body.get("booths_total"),
+                    body.get("booths_reported"),
+                )
+                self._reply(200, json.dumps({"ok": True, "districts": updated}).encode())
+            except Exception as e:
+                self._reply(500, json.dumps({"error": str(e)}).encode())
+            return
+
         if self.path != "/v1/messages":
             self.send_error(404)
             return
