@@ -1773,62 +1773,153 @@ def _log_briefing_send(trigger, threat_level, headline, ntfy_status, sms_status,
 
 # ── Brief formatter ───────────────────────────────────────────────────────────
 
+def _within_24h(time_str):
+    """Return True if a feed item's relative time string is within 24 hours."""
+    t = (time_str or "").strip().lower()
+    if not t or t in ("just now", "now", "recent"):
+        return True
+    if "d ago" in t:
+        return False          # e.g. "1d ago", "2d ago"
+    if "h ago" in t:
+        try:
+            return int(re.search(r"(\d+)", t).group(1)) <= 24
+        except Exception:
+            return True
+    if "m ago" in t:
+        return True           # minutes → definitely within 24h
+    return True               # unknown format — include
+
+
 def _format_brief_telegram(parsed, trigger, ts):
     """
     Format a full briefing for Telegram (HTML parse_mode).
-    Telegram HTML supports: <b>, <i>, <code>, <pre>.
-    Returns list of message strings — usually 1, max 2 (split if >4096 chars).
+    - HIGH + MEDIUM feed items from past 24h (Python-filtered)
+    - LLM-written Bankura + neighbouring district analysis
+    - Key risks, observer actions, disinfo, disclaimer
+    Splits into multiple messages with (1/N) labels if >4000 chars.
     """
     m  = parsed.get("metrics", {})
     an = parsed.get("analysis", {})
     tl = m.get("threatLevel", "LOW")
-    tl_emoji = {"LOW":"🟢","MODERATE":"🟡","HIGH":"🔴","CRITICAL":"🚨"}.get(tl, "🔵")
-
+    tl_emoji = {"LOW":"🟢","MODERATE":"🟡","HIGH":"🔴","CRITICAL":"🚨"}.get(tl,"🔵")
     trigger_label = {
         "scheduled":  "[Scheduled]",
         "escalation": "[ESCALATION ALERT]",
         "manual":     "[Manual test]",
     }.get(trigger, "[Brief]")
 
-    risks   = an.get("keyRisks", [])
-    actions = an.get("observerActions", [])
+    PANEL_LABELS = {
+        "bankura":   "Bankura",
+        "surrounds": "Surrounds",
+        "statewide": "Statewide",
+        "alerts":    "Alerts",
+        "official":  "Official",
+        "parties":   "Parties",
+    }
+    SEV_EMOJI = {"high": "🔴", "medium": "🟡"}
 
-    lines = [
-        f"<b>{trigger_label} — {ts}</b>",
-        f"{'—'*28}",
-        f"Threat: {tl_emoji} <b>{tl}</b>  |  Signals: {m.get('totalSignals',0)}  |  High: {m.get('highAlerts',0)}",
-        f"",
-        f"<b>HEADLINE</b>",
-        an.get("headline", "No analysis available"),
-        f"",
-    ]
+    # ── Collect HIGH + MEDIUM items from past 24h ──────────────────────────
+    alert_lines = []
+    for panel, label in PANEL_LABELS.items():
+        for item in (parsed.get(panel) or []):
+            sev = (item.get("severity") or "").lower()
+            if sev not in ("high", "medium"):
+                continue
+            if not _within_24h(item.get("time", "")):
+                continue
+            summary = (item.get("summary") or "").strip()
+            source  = (item.get("source") or "").strip()
+            t_label = item.get("time", "")
+            line = f"{SEV_EMOJI[sev]} [{label}] {summary}"
+            if source:
+                line += f" — <i>{source}</i>"
+            if t_label:
+                line += f" <i>({t_label})</i>"
+            alert_lines.append(line)
+
+    # ── Build sections ─────────────────────────────────────────────────────
+    sections = []
+
+    # Header
+    sections.append(
+        f"📍 <b>WB Intel — Bankura District Observer</b>\n"
+        f"<b>{trigger_label}</b>  |  {ts}\n"
+        f"{tl_emoji} <b>{tl}</b>  |  Signals: {m.get('totalSignals',0)}  |  High alerts: {m.get('highAlerts',0)}"
+    )
+
+    # Active alerts
+    if alert_lines:
+        sections.append(
+            "<b>━━━ ACTIVE ALERTS (HIGH/MEDIUM · 24h) ━━━</b>\n" +
+            "\n".join(alert_lines)
+        )
+    else:
+        sections.append(
+            "<b>━━━ ACTIVE ALERTS (HIGH/MEDIUM · 24h) ━━━</b>\n"
+            "No high or medium alerts in the past 24 hours."
+        )
+
+    # Bankura situation (LLM)
+    bankura_sit = (an.get("bankuraSituation") or "").strip()
+    if bankura_sit:
+        sections.append(f"<b>━━━ BANKURA SITUATION ━━━</b>\n{bankura_sit}")
+
+    # Neighbouring districts (LLM)
+    surr_sit = (an.get("surroundingSituation") or "").strip()
+    if surr_sit:
+        sections.append(f"<b>━━━ NEIGHBOURING DISTRICTS ━━━</b>\n{surr_sit}")
+
+    # Key risks
+    risks = [r for r in (an.get("keyRisks") or []) if r and r.strip()]
     if risks:
-        lines.append("<b>KEY RISKS</b>")
-        for r in risks:
-            if r: lines.append(f"• {r}")
-        lines.append("")
+        sections.append(
+            "<b>━━━ KEY RISKS ━━━</b>\n" + "\n".join(f"• {r}" for r in risks)
+        )
+
+    # Observer actions
+    actions = [a for a in (an.get("observerActions") or []) if a and a.strip()]
     if actions:
-        lines.append("<b>OBSERVER ACTIONS</b>")
-        for a in actions:
-            if a: lines.append(f"• {a}")
-        lines.append("")
-    disinfo = an.get("disinfoAlerts", "")
+        sections.append(
+            "<b>━━━ OBSERVER ACTIONS ━━━</b>\n" + "\n".join(f"• {a}" for a in actions)
+        )
+
+    # Disinfo
+    disinfo = (an.get("disinfoAlerts") or "").strip()
     if disinfo and disinfo.lower() not in ("none detected", "none", ""):
-        lines.append(f"⚠️ <b>DISINFO:</b> {disinfo}")
-        lines.append("")
-    assessment = an.get("overallAssessment", "")
-    if assessment:
-        lines.append(f"<i>{assessment}</i>")
+        sections.append(f"⚠️ <b>DISINFO:</b> {disinfo}")
 
-    full = "\n".join(lines).strip()
+    # Disclaimer (always last)
+    sections.append("⚠️ <i>AI-generated · unverified · cross-check before acting</i>")
 
-    # Split into ≤4096-char messages (Telegram limit) at paragraph boundaries
-    if len(full) <= 4096:
-        return [full]
-    split_at = full.rfind("\n\n", 0, 4000)
-    if split_at == -1:
-        split_at = 4000
-    return [full[:split_at].strip(), full[split_at:].strip()]
+    # ── Split into ≤4000-char parts at section boundaries ─────────────────
+    parts   = []
+    current = ""
+    for sec in sections:
+        candidate = (current + "\n\n" + sec).strip() if current else sec
+        if len(candidate) <= 4000:
+            current = candidate
+        else:
+            if current:
+                parts.append(current)
+            if len(sec) > 4000:
+                # Hard-split oversized section (e.g. very many alerts)
+                for i in range(0, len(sec), 3900):
+                    parts.append(sec[i:i+3900].strip())
+                current = ""
+            else:
+                current = sec
+    if current:
+        parts.append(current)
+
+    if not parts:
+        parts = [current or "No data"]
+
+    # Add (1/N) page labels when multi-part
+    n = len(parts)
+    if n > 1:
+        parts = [f"{p}\n\n<i>({i+1}/{n})</i>" for i, p in enumerate(parts)]
+
+    return parts
 
 def _format_brief_sms(parsed, trigger, ts):
     """Format a compact briefing for SMS (≤320 chars, 2 segments)."""
