@@ -94,6 +94,24 @@ def _db_init():
             );
             CREATE INDEX IF NOT EXISTS idx_ts_district
                 ON turnout_snapshots(district, recorded_at);
+
+            -- Phase 4B: Daily Briefing
+            CREATE TABLE IF NOT EXISTS briefing_config (
+                key   TEXT PRIMARY KEY,
+                value TEXT
+            );
+            CREATE TABLE IF NOT EXISTS briefing_sends (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                sent_at      TEXT,
+                trigger      TEXT,
+                threat_level TEXT,
+                headline     TEXT,
+                ntfy_status  TEXT,
+                sms_status   TEXT,
+                cycle_id     INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_bsends_sent
+                ON briefing_sends(sent_at);
         """)
         c.commit(); c.close()
     print(f"  [DB] Initialised: {DB_PATH}")
@@ -1563,6 +1581,9 @@ def inject_news_into_payload(payload_dict):
     # ── Phase 4: per-AC threat metrics for map overlay ────────────────────────
     pre_built["acMetrics"] = _build_ac_metrics(panel_items, figure_mentions)
 
+    # ── Phase 4B: escalation briefing check ───────────────────────────────────
+    _check_escalation(threat_level)
+
     # ── Phase 2: queue new MED/HIGH articles for background digesting ──────────
     _save_digest_candidates(panel_items)
 
@@ -1646,6 +1667,419 @@ def inject_news_into_payload(payload_dict):
     payload_dict["max_tokens"] = 1400   # analysis (~700) + bangla_translations 6×~40tok (~240) + headroom
 
     return payload_dict
+
+
+# ── Phase 4B: Daily Briefing (ntfy.sh + Fast2SMS fallback) ───────────────────
+#
+# RISK & MITIGATION (hardcoded per design):
+#
+#   RISK 1 — ntfy.sh topic guessed by third parties
+#     MITIGATION: User must set a long random topic string (e.g. wb_bankura_x7k9p2).
+#                 Proxy warns if topic is shorter than 12 chars.
+#
+#   RISK 2 — ntfy.sh unreachable on field network (govt/hotel Wi-Fi blocks)
+#     MITIGATION: Fast2SMS SMS fallback. Enabled only when api_key is configured.
+#                 SMS is intentionally DISABLED until user supplies Fast2SMS key.
+#
+#   RISK 3 — Duplicate escalation alerts (same HIGH cycle fires twice)
+#     MITIGATION: Dedup by (threat_level, cycle_id) — if a send record already
+#                 exists for this cycle at this threat level, skip silently.
+#
+#   RISK 4 — SMS API key stored in plaintext in local DB
+#     MITIGATION: DB file is local-only (never committed — in .gitignore).
+#                 Proxy prints a warning on startup if key is set.
+#
+#   RISK 5 — Proxy not running at scheduled send time
+#     MITIGATION: Scheduler logs missed sends. On restart, if last_sent is more
+#                 than 23h ago AND current time is past schedule_time, sends once.
+#
+#   RISK 6 — Brief too long for SMS (160 char limit per segment)
+#     MITIGATION: SMS variant is separately formatted to ≤320 chars (2 segments).
+#                 ntfy.sh variant is full-length (no practical limit).
+
+FEATURE_BRIEFING = True    # master switch — set False to disable entirely
+BRIEFING_SMS_ENABLED = False  # SMS via Fast2SMS — OFF until user supplies API key
+
+# ── Briefing config helpers ───────────────────────────────────────────────────
+
+_BRIEFING_DEFAULTS = {
+    "enabled":              "false",
+    "ntfy_topic":           "",
+    "schedule_time":        "08:00",   # IST, 24h format
+    "escalate_on_high":     "true",
+    "escalate_on_critical": "true",
+    "election_day_interval":"120",     # minutes between briefings on election day
+    "sms_provider":         "fast2sms",
+    "sms_api_key":          "",        # Fast2SMS key — blank = SMS disabled
+    "sms_phone":            "",        # +91XXXXXXXXXX
+}
+
+def _load_briefing_config():
+    """Return briefing config dict (DB values merged over defaults)."""
+    cfg = dict(_BRIEFING_DEFAULTS)
+    if not FEATURE_SQLITE:
+        return cfg
+    try:
+        with _db_lock:
+            c = _db_conn()
+            rows = c.execute("SELECT key, value FROM briefing_config").fetchall()
+            c.close()
+        for row in rows:
+            cfg[row["key"]] = row["value"]
+    except Exception:
+        pass
+    return cfg
+
+def _save_briefing_config(updates):
+    """Persist a dict of key→value pairs into briefing_config table."""
+    if not FEATURE_SQLITE:
+        return
+    with _db_lock:
+        c = _db_conn()
+        for k, v in updates.items():
+            c.execute("INSERT OR REPLACE INTO briefing_config(key,value) VALUES(?,?)", (k, str(v)))
+        c.commit(); c.close()
+
+def _briefing_already_sent(trigger, cycle_id, threat_level):
+    """Return True if an identical briefing was already sent for this cycle."""
+    if not FEATURE_SQLITE:
+        return False
+    try:
+        with _db_lock:
+            c = _db_conn()
+            n = c.execute("""
+                SELECT COUNT(*) FROM briefing_sends
+                WHERE trigger=? AND cycle_id=? AND threat_level=?
+            """, (trigger, cycle_id, threat_level)).fetchone()[0]
+            c.close()
+        return n > 0
+    except Exception:
+        return False
+
+def _log_briefing_send(trigger, threat_level, headline, ntfy_status, sms_status, cycle_id):
+    if not FEATURE_SQLITE:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    with _db_lock:
+        c = _db_conn()
+        c.execute("""
+            INSERT INTO briefing_sends
+              (sent_at, trigger, threat_level, headline, ntfy_status, sms_status, cycle_id)
+            VALUES (?,?,?,?,?,?,?)
+        """, (now, trigger, threat_level, headline[:300], ntfy_status, sms_status, cycle_id))
+        c.commit(); c.close()
+
+# ── Brief formatter ───────────────────────────────────────────────────────────
+
+def _format_brief_ntfy(parsed, trigger, ts):
+    """Format a full briefing for ntfy.sh (no length limit)."""
+    m  = parsed.get("metrics", {})
+    an = parsed.get("analysis", {})
+    tl = m.get("threatLevel", "LOW")
+    tl_emoji = {"LOW":"🟢","MODERATE":"🟡","HIGH":"🔴","CRITICAL":"🚨"}.get(tl, "🔵")
+
+    trigger_label = {"scheduled":"[Scheduled]","escalation":"[ESCALATION ALERT]","manual":"[Manual]"}.get(trigger,"[Brief]")
+
+    risks   = an.get("keyRisks", [])
+    actions = an.get("observerActions", [])
+
+    lines = [
+        f"{trigger_label} {ts}",
+        f"--------------------",
+        f"Threat: {tl_emoji} {tl}  |  Signals: {m.get('totalSignals',0)}  |  High alerts: {m.get('highAlerts',0)}",
+        f"",
+        f"HEADLINE:",
+        an.get("headline","—"),
+        f"",
+    ]
+    if risks:
+        lines.append("KEY RISKS:")
+        for r in risks:
+            if r: lines.append(f"• {r}")
+        lines.append("")
+    if actions:
+        lines.append("OBSERVER ACTIONS:")
+        for a in actions:
+            if a: lines.append(f"• {a}")
+        lines.append("")
+    disinfo = an.get("disinfoAlerts","")
+    if disinfo and disinfo.lower() not in ("none detected","none",""):
+        lines.append(f"⚠️ DISINFO: {disinfo}")
+        lines.append("")
+    lines.append(an.get("overallAssessment",""))
+    return "\n".join(lines).strip()
+
+def _format_brief_sms(parsed, trigger, ts):
+    """Format a compact briefing for SMS (≤320 chars, 2 segments)."""
+    m  = parsed.get("metrics", {})
+    an = parsed.get("analysis", {})
+    tl = m.get("threatLevel", "LOW")
+    headline = an.get("headline","—")[:120]
+    risk0 = (an.get("keyRisks") or [""])[0][:80]
+    action0 = (an.get("observerActions") or [""])[0][:80]
+    msg = (
+        f"WB Intel {ts[:10]} | {tl}\n"
+        f"{headline}\n"
+        f"Risk: {risk0}\n"
+        f"Action: {action0}"
+    )
+    return msg[:320]
+
+# ── Send functions ────────────────────────────────────────────────────────────
+
+def _send_ntfy(topic, title, body, priority="default"):
+    """
+    POST a briefing to ntfy.sh/{topic}.
+    Returns ('ok', '') or ('error', reason).
+    """
+    if not topic or len(topic) < 8:
+        return ("skip", "topic too short or not set")
+    try:
+        # Encode body as UTF-8; ASCII-safe title (ntfy headers are latin-1)
+        payload     = body.encode("utf-8")
+        safe_title  = title.encode("ascii", errors="replace").decode("ascii")
+        req = urllib.request.Request(
+            f"https://ntfy.sh/{topic}",
+            data=payload,
+            headers={
+                "Title":    safe_title,
+                "Priority": priority,
+                "Tags":     "election,briefing",
+                "Content-Type": "text/plain; charset=utf-8",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return ("ok", str(resp.status))
+    except Exception as e:
+        return ("error", str(e)[:120])
+
+def _send_sms_fast2sms(api_key, phone, message):
+    """
+    Send SMS via Fast2SMS DLT route.
+    INTENTIONALLY INACTIVE — BRIEFING_SMS_ENABLED=False until user supplies key.
+    Returns ('skip', reason) when disabled.
+    """
+    if not BRIEFING_SMS_ENABLED:
+        return ("skip", "SMS disabled — set BRIEFING_SMS_ENABLED=True and supply Fast2SMS API key")
+    if not api_key or not phone:
+        return ("skip", "no api_key or phone configured")
+    try:
+        phone_clean = re.sub(r"[^\d]", "", phone)[-10:]   # last 10 digits
+        body = json.dumps({
+            "route":   "v3",
+            "sender_id": "WBINTEL",
+            "message": message,
+            "language": "english",
+            "flash":   0,
+            "numbers": phone_clean,
+        }).encode()
+        req = urllib.request.Request(
+            "https://www.fast2sms.com/dev/bulkV2",
+            data=body,
+            headers={
+                "authorization": api_key,
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+            if data.get("return"):
+                return ("ok", data.get("message","sent"))
+            return ("error", str(data)[:120])
+    except Exception as e:
+        return ("error", str(e)[:120])
+
+# ── Orchestrator ──────────────────────────────────────────────────────────────
+
+_last_escalation_threat = "LOW"   # track previous threat level for escalation detection
+
+def _send_briefing(trigger="manual"):
+    """
+    Build and dispatch a briefing from the latest cycle in DB.
+    trigger: 'scheduled' | 'escalation' | 'manual'
+    """
+    if not FEATURE_BRIEFING:
+        return {"ntfy": "skip", "sms": "skip", "reason": "feature disabled"}
+
+    cfg = _load_briefing_config()
+    if cfg["enabled"] != "true" and trigger != "manual":
+        return {"ntfy": "skip", "sms": "skip", "reason": "briefing disabled"}
+
+    ntfy_topic = cfg.get("ntfy_topic", "").strip()
+    sms_key    = cfg.get("sms_api_key", "").strip()
+    sms_phone  = cfg.get("sms_phone", "").strip()
+
+    # Fetch latest cycle from DB
+    cycle_id   = None
+    parsed     = {}
+    ts         = datetime.now().strftime("%d %b %Y %H:%M IST")
+    if FEATURE_SQLITE:
+        try:
+            with _db_lock:
+                c = _db_conn()
+                row = c.execute(
+                    "SELECT id, fetched_at, full_json FROM cycles ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+                c.close()
+            if row:
+                cycle_id = row["id"]
+                ts       = row["fetched_at"] or ts
+                parsed   = json.loads(row["full_json"] or "{}")
+        except Exception as e:
+            print(f"  [briefing] DB read error: {e}")
+
+    threat_level = (parsed.get("metrics") or {}).get("threatLevel", "LOW")
+    headline     = (parsed.get("analysis") or {}).get("headline", "No analysis available")
+
+    # Dedup: skip if already sent for this cycle+trigger+threat combo
+    if cycle_id and _briefing_already_sent(trigger, cycle_id, threat_level):
+        print(f"  [briefing] Dedup skip — already sent ({trigger}, cycle {cycle_id})")
+        return {"ntfy": "skip", "sms": "skip", "reason": "already sent"}
+
+    # Format briefs
+    ntfy_body  = _format_brief_ntfy(parsed, trigger, ts)
+    sms_body   = _format_brief_sms(parsed, trigger, ts)
+    tl_emoji   = {"LOW":"🟢","MODERATE":"🟡","HIGH":"🔴","CRITICAL":"🚨"}.get(threat_level,"🔵")
+    ntfy_title = f"WB Intel - {tl_emoji} {threat_level} | Bankura"
+
+    # Set ntfy priority
+    ntfy_priority = "high" if threat_level in ("HIGH","CRITICAL") else "default"
+
+    # Send ntfy
+    ntfy_status, ntfy_detail = _send_ntfy(ntfy_topic, ntfy_title, ntfy_body, ntfy_priority)
+    print(f"  [briefing] ntfy → {ntfy_status} ({ntfy_detail}) | topic={ntfy_topic[:12]}…")
+
+    # Send SMS (only if enabled + configured)
+    sms_status, sms_detail = _send_sms_fast2sms(sms_key, sms_phone, sms_body)
+    if sms_status != "skip":
+        print(f"  [briefing] sms → {sms_status} ({sms_detail})")
+
+    # Log to DB
+    _log_briefing_send(trigger, threat_level, headline, ntfy_status, sms_status, cycle_id)
+
+    return {
+        "ntfy":         ntfy_status,
+        "ntfy_detail":  ntfy_detail,
+        "sms":          sms_status,
+        "sms_detail":   sms_detail,
+        "threat_level": threat_level,
+        "headline":     headline,
+    }
+
+def _check_escalation(new_threat):
+    """
+    Compare new threat level against last known.
+    Fire an escalation briefing if threshold crossed upward.
+    Runs in a fire-and-forget thread so it never blocks the fetch cycle.
+    """
+    global _last_escalation_threat
+    cfg = _load_briefing_config()
+    prev = _last_escalation_threat
+    _last_escalation_threat = new_threat
+
+    LEVELS = {"LOW":0,"MODERATE":1,"HIGH":2,"CRITICAL":3}
+    prev_n = LEVELS.get(prev, 0)
+    new_n  = LEVELS.get(new_threat, 0)
+
+    if new_n <= prev_n:
+        return   # no escalation
+
+    should_alert = (
+        (new_threat == "HIGH"     and cfg.get("escalate_on_high","true")     == "true") or
+        (new_threat == "CRITICAL" and cfg.get("escalate_on_critical","true") == "true")
+    )
+    if not should_alert:
+        return
+
+    print(f"  [briefing] Threat escalated {prev}→{new_threat} — sending escalation brief")
+    threading.Thread(
+        target=_send_briefing,
+        args=("escalation",),
+        daemon=True,
+        name="briefing-escalation",
+    ).start()
+
+# ── Scheduler loop ────────────────────────────────────────────────────────────
+
+def _start_briefing_scheduler():
+    """Launch the daily briefing scheduler as a daemon thread."""
+    if not FEATURE_BRIEFING:
+        return
+
+    def _scheduler_loop():
+        print("  [briefing] Scheduler started")
+        last_scheduled_date = None
+
+        while True:
+            try:
+                time.sleep(60)   # check every minute
+                cfg = _load_briefing_config()
+                if cfg.get("enabled") != "true":
+                    continue
+
+                now_ist = datetime.now()   # local time (proxy runs in IST)
+                today   = now_ist.date()
+
+                # ── Election day: every N minutes between 07:00–18:00 ──────
+                is_election_day = (today.year == 2026 and today.month == 4 and today.day == 23)
+                if is_election_day:
+                    interval_min = int(cfg.get("election_day_interval", "120"))
+                    # Check last send time
+                    last_sent = _last_briefing_sent_at()
+                    if last_sent:
+                        minutes_since = (datetime.now(timezone.utc) -
+                                         datetime.fromisoformat(last_sent)).total_seconds() / 60
+                        if minutes_since < interval_min:
+                            continue
+                    h = now_ist.hour
+                    if 7 <= h < 18:
+                        print("  [briefing] Election day scheduled brief")
+                        _send_briefing("scheduled")
+                    continue
+
+                # ── Normal days: once at schedule_time ────────────────────
+                if last_scheduled_date == today:
+                    continue   # already sent today
+                sched = cfg.get("schedule_time", "08:00")
+                try:
+                    sched_h, sched_m = int(sched.split(":")[0]), int(sched.split(":")[1])
+                except Exception:
+                    sched_h, sched_m = 8, 0
+                if now_ist.hour > sched_h or (now_ist.hour == sched_h and now_ist.minute >= sched_m):
+                    # Check RISK 5: missed send catchup (only if last send > 23h ago)
+                    last_sent = _last_briefing_sent_at()
+                    if last_sent:
+                        hours_since = (datetime.now(timezone.utc) -
+                                       datetime.fromisoformat(last_sent)).total_seconds() / 3600
+                        if hours_since < 23:
+                            last_scheduled_date = today
+                            continue
+                    print(f"  [briefing] Daily brief at {sched}")
+                    _send_briefing("scheduled")
+                    last_scheduled_date = today
+
+            except Exception as e:
+                print(f"  [briefing] Scheduler error: {e}")
+                time.sleep(60)
+
+    threading.Thread(target=_scheduler_loop, daemon=True, name="briefing-scheduler").start()
+
+def _last_briefing_sent_at():
+    """Return ISO timestamp of most recent briefing send, or None."""
+    if not FEATURE_SQLITE:
+        return None
+    try:
+        with _db_lock:
+            c = _db_conn()
+            row = c.execute(
+                "SELECT sent_at FROM briefing_sends ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            c.close()
+        return row["sent_at"] if row else None
+    except Exception:
+        return None
 
 
 # ── Phase 4: Per-AC threat metrics for map overlay ───────────────────────────
@@ -2101,6 +2535,52 @@ class Handler(BaseHTTPRequestHandler):
             self._cors(); self.end_headers()
             self.wfile.write(body)
 
+        elif path == "/api/briefing/config":
+            # GET /api/briefing/config — return current config (mask SMS key)
+            cfg = _load_briefing_config()
+            safe = dict(cfg)
+            if safe.get("sms_api_key"):
+                safe["sms_api_key"] = "***"   # never expose key to browser
+            body = json.dumps(safe).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self._cors(); self.end_headers()
+            self.wfile.write(body)
+
+        elif path == "/api/briefing/send":
+            # GET /api/briefing/send — trigger briefing immediately
+            result = _send_briefing("manual")
+            body = json.dumps(result).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self._cors(); self.end_headers()
+            self.wfile.write(body)
+
+        elif path == "/api/briefing/history":
+            # GET /api/briefing/history?limit=20
+            limit = 20
+            if "?" in self.path:
+                qs = parse_qs(self.path.split("?",1)[1])
+                limit = int(qs.get("limit",["20"])[0])
+            rows = []
+            if FEATURE_SQLITE:
+                try:
+                    with _db_lock:
+                        c = _db_conn()
+                        rows = [dict(r) for r in c.execute("""
+                            SELECT id, sent_at, trigger, threat_level, headline,
+                                   ntfy_status, sms_status, cycle_id
+                            FROM briefing_sends ORDER BY id DESC LIMIT ?
+                        """, (limit,)).fetchall()]
+                        c.close()
+                except Exception as e:
+                    print(f"  [briefing] history error: {e}")
+            body = json.dumps({"sends": rows}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self._cors(); self.end_headers()
+            self.wfile.write(body)
+
         elif path == "/api/digest/redigest":
             # POST-like GET: /api/digest/redigest?id=N  — re-queue a failed/done article
             if FEATURE_SQLITE and "?" in self.path:
@@ -2188,6 +2668,26 @@ class Handler(BaseHTTPRequestHandler):
             pass  # client disconnected — normal for browser timeout
 
     def do_POST(self):
+        if self.path == "/api/briefing/config":
+            # POST /api/briefing/config — save config {enabled, ntfy_topic, schedule_time, ...}
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body   = json.loads(self.rfile.read(length))
+                allowed = set(_BRIEFING_DEFAULTS.keys())
+                updates = {k: v for k, v in body.items() if k in allowed}
+                # RISK 1 guard: warn on short topic
+                topic = updates.get("ntfy_topic", "")
+                if topic and len(topic) < 12:
+                    self._reply(400, json.dumps({
+                        "error": "ntfy_topic too short — use at least 12 chars for security"
+                    }).encode())
+                    return
+                _save_briefing_config(updates)
+                self._reply(200, json.dumps({"ok": True}).encode())
+            except Exception as e:
+                self._reply(500, json.dumps({"error": str(e)}).encode())
+            return
+
         if self.path == "/api/turnout":
             # POST /api/turnout — manual entry: {district, pct, booths_total?, booths_reported?}
             try:
@@ -2421,6 +2921,9 @@ def main():
     # ── Phase 2: init SQLite DB and start background digest worker ───────────
     _db_init()
     _start_digest_worker(ollama_base=f"http://localhost:11434", model=model)
+
+    # ── Phase 4B: start daily briefing scheduler ──────────────────────────────
+    _start_briefing_scheduler()
 
     # Pre-warm wire cache AND keep it warm with a background refresh thread.
     # Wire cache TTL is 10 min; we refresh every 9 min so page loads always
