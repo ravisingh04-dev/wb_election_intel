@@ -31,12 +31,14 @@ from urllib.parse import parse_qs, urlparse
 SCRIPT_DIR     = Path(__file__).parent.resolve()
 DASHBOARD_FILE = SCRIPT_DIR / "wb_live_intel_dashboard.html"
 OSINT_FILE     = SCRIPT_DIR / "wb_osint_monitor.html"
-DEFAULT_PORT   = 5050
+DEFAULT_PORT   = 5055   # dev sandbox — prod runs on 5050
 
 # ─── PHASE 2 FEATURE FLAGS ────────────────────────────────────────────────────
 # Set to False to instantly disable without touching any other code.
-FEATURE_SQLITE  = True   # persist cycles + articles to bankura_intel.db
-FEATURE_DIGEST  = True   # background LLM digest of MED/HIGH articles
+FEATURE_SQLITE   = True   # persist cycles + articles to bankura_intel.db
+FEATURE_DIGEST   = True   # background LLM digest of MED/HIGH articles
+
+_wire_cache = {"ts": 0.0, "items": []}   # ANI+PTI wire feed cache (10-min TTL)
 
 DB_PATH  = SCRIPT_DIR / "bankura_intel.db"
 _db_lock = threading.Lock()   # single write-lock for all DB operations
@@ -94,6 +96,12 @@ def _save_digest_candidates(panel_items):
     if not FEATURE_SQLITE or not FEATURE_DIGEST:
         return
     now = datetime.now(timezone.utc).isoformat()
+    _DIGEST_WB_KW = [
+        "west bengal", "bengal", "bankura", "bishnupur", "kolkata", "calcutta",
+        "mamata", "trinamool", "tmc", "wb election", "wb 2026", "wb poll",
+        "purulia", "jhargram", "birbhum", "bardhaman", "medinipur", "howrah",
+        "saltora", "chhatna", "ranibandh", "taldangra", "barjora", "sonamukhi",
+    ]
     # Panel priority: what the observer cares about most, first
     panel_order = ["bankura","alerts","surrounds","statewide","official","parties","bangla"]
     candidates = []
@@ -105,6 +113,10 @@ def _save_digest_candidates(panel_items):
                 continue
             sev = _score_severity(item.get("title","") + " " + item.get("desc",""))
             if sev not in ("high", "medium"):
+                continue
+            # WB relevance gate — drop non-Bengal articles (UP, Bihar, national, etc.)
+            text = (item.get("title","") + " " + item.get("desc","")).lower()
+            if not any(kw in text for kw in _DIGEST_WB_KW):
                 continue
             seen_urls.add(url)
             candidates.append((
@@ -262,6 +274,82 @@ def _start_digest_worker(ollama_base, model):
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
 
+# ── ANI + PTI wire fetcher (cached 10 min) ─────────────────────────────────
+
+def _fetch_wire():
+    """Fetch ANI + PTI Google News RSS for West Bengal, cache 10 min.
+    Only articles published within the last 30 hours are included."""
+    global _wire_cache
+    if time.time() - _wire_cache["ts"] < 600:   # 10-min cache
+        return _wire_cache["items"]
+
+    import email.utils as _eu
+    WIRE_MAX_AGE_H = 48          # 48h window
+    now_ts = time.time()
+    cutoff_ts = now_ts - WIRE_MAX_AGE_H * 3600
+
+    items = []
+    ua = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+    for source, url in WIRE_FEEDS:
+        try:
+            req  = urllib.request.Request(url, headers={"User-Agent": ua})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = r.read().lstrip(b'\xef\xbb\xbf')
+            root    = ET.fromstring(data)
+            entries = root.findall(".//item")
+            seen    = set()
+            for it in entries[:40]:          # scan more items since old ones get dropped
+                title = (it.findtext("title") or "").strip()
+                title = re.sub(r"\s*[-|]\s*[A-Z][^|]{2,35}$", "", title).strip()
+                if not title or len(title) < 10:
+                    continue
+                fp = re.sub(r"\W+", "", title.lower())[:40]
+                if fp in seen:
+                    continue
+                seen.add(fp)
+                link    = (it.findtext("link") or "").strip()
+                pub_raw = (it.findtext("pubDate") or "").strip()
+                # ── Time filter: drop items older than 30 h ───────────────
+                if pub_raw:
+                    try:
+                        pub_ts = _eu.parsedate_to_datetime(pub_raw).timestamp()
+                        if pub_ts < cutoff_ts:
+                            continue          # too old
+                        pub_iso = datetime.fromtimestamp(pub_ts, tz=timezone.utc).isoformat()
+                    except Exception:
+                        pub_iso = pub_raw     # unparseable — keep item, show raw string
+                else:
+                    pub_iso = ""
+                # ── WB relevance filter ───────────────────────────────────
+                tl = title.lower()
+                if not any(kw in tl for kw in _WIRE_WB_KW):
+                    continue
+                sev = _score_severity(title)
+                items.append({
+                    "source":   source,
+                    "title":    title,
+                    "url":      link,
+                    "pub":      pub_iso,
+                    "severity": sev,
+                })
+        except Exception as e:
+            print(f"  [wire] {source} fetch error: {e}")
+
+    # Sort: HIGH first, then newest first
+    # pub is stored as ISO string — fromisoformat() handles it correctly
+    def _pub_ts(item):
+        try:
+            return datetime.fromisoformat(item["pub"]).timestamp() if item["pub"] else 0
+        except Exception:
+            return 0
+    items.sort(key=lambda x: (
+        0 if x["severity"] == "high" else (1 if x["severity"] == "medium" else 2),
+        -_pub_ts(x)
+    ))
+    _wire_cache = {"ts": time.time(), "items": items}
+    return items
+
 # ── Political figures to monitor for feed mentions ───────────────────────────
 # Updated March 2026 — all declared 2026 candidates for Bankura district ACs
 POLITICAL_FIGURES = [
@@ -381,6 +469,21 @@ def gnews(query):
 def gnews_bn(query):
     """Google News RSS — Bengali language edition (returns Bengali-language articles)."""
     return f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}&hl=bn&gl=IN&ceid=IN:bn"
+
+# ── Wire agency feeds (WB-scoped, used by /api/wire) ─────────────────────────
+# ANI: site:aninews.in returns Google-cached stale articles (100–40000h old)
+#      Using keyword query instead — same approach as PTI
+# IANS: dropped — Google News returns stub "IANS - IANS" titles only (unusable)
+WIRE_FEEDS = [
+    ("ANI", gnews("ANI \"West Bengal\" election 2026")),
+    ("PTI", gnews("PTI \"West Bengal\" election 2026")),
+]
+# Minimum keywords one of which must appear in title for wire item to pass WB filter
+_WIRE_WB_KW = [
+    "west bengal", "bengal", "bankura", "kolkata", "calcutta", "mamata",
+    "trinamool", "tmc", "bjp", "cpm", "wb election", "wb poll",
+    "bishnupur", "purulia", "jhargram", "medinipur", "howrah",
+]
 
 RSS_FEEDS = [
     # ── BANKURA LOCAL (4 days) ────────────────────────────────────────────
@@ -1497,6 +1600,19 @@ class Handler(BaseHTTPRequestHandler):
             self._cors(); self.end_headers()
             self.wfile.write(body)
 
+        elif path == "/api/wire":
+            # GET /api/wire — ANI + PTI West Bengal wire feed (cached 10 min)
+            try:
+                items = _fetch_wire()
+            except Exception as e:
+                print(f"  [wire] ERROR in _fetch_wire: {e}")
+                items = []
+            body = json.dumps({"items": items, "count": len(items)}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self._cors(); self.end_headers()
+            self.wfile.write(body)
+
         elif path == "/api/digest/redigest":
             # POST-like GET: /api/digest/redigest?id=N  — re-queue a failed/done article
             if FEATURE_SQLITE and "?" in self.path:
@@ -1794,6 +1910,30 @@ def main():
     # ── Phase 2: init SQLite DB and start background digest worker ───────────
     _db_init()
     _start_digest_worker(ollama_base=f"http://localhost:11434", model=model)
+
+    # Pre-warm wire cache AND keep it warm with a background refresh thread.
+    # Wire cache TTL is 10 min; we refresh every 9 min so page loads always
+    # get an instant cached response instead of waiting 15-30s for a cold fetch.
+    def _wire_refresh_loop():
+        import time as _t
+        # Initial prewarm on startup
+        try:
+            _fetch_wire()
+            print("  [wire] Cache pre-warmed")
+        except Exception as e:
+            print(f"  [wire] Pre-warm failed: {e}")
+        # Then keep refreshing every 9 min (ahead of the 10-min TTL)
+        while True:
+            _t.sleep(9 * 60)
+            try:
+                global _wire_cache
+                _wire_cache["ts"] = 0.0   # force expiry so _fetch_wire re-fetches
+                _fetch_wire()
+                print("  [wire] Background cache refreshed")
+            except Exception as e:
+                print(f"  [wire] Background refresh failed: {e}")
+    threading.Thread(target=_wire_refresh_loop, daemon=True, name="wire-refresh").start()
+
 
     server = QuietHTTPServer(("127.0.0.1", port), Handler)
 

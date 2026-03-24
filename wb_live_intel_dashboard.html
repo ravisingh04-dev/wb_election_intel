@@ -221,18 +221,22 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
 /* INTEL GRID — 3-col top strip */
 .intel-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;align-items:start}
-/* MID ROW — figures + trend (flex so trend collapses cleanly when hidden) */
+/* MID ROW — figures + trend */
 .mid-row{display:flex;gap:14px;align-items:flex-start}
 .mid-row>*{flex:1;min-width:0}
-/* TELEGRAM PANEL */
-.tg-panel{background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
-.tg-header{padding:10px 14px;border-bottom:1px solid var(--border);background:var(--bg3);display:flex;align-items:center;gap:8px}
-.tg-body{padding:14px;flex:1;font-size:12px;min-height:80px}
-.tg-post{padding:7px 10px;border-left:2px solid var(--border2);margin-bottom:8px;font-size:12px;color:var(--text2);line-height:1.5;border-radius:0 6px 6px 0}
-.tg-post.tg-high{border-left-color:var(--red)}
-.tg-post.tg-med{border-left-color:var(--amber)}
-.tg-post-meta{font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3);margin-bottom:3px;display:flex;gap:6px}
-@media(max-width:960px){.intel-grid{grid-template-columns:1fr 1fr}.intel-grid .tg-panel{grid-column:1/-1}}
+/* WIRE TICKER — default height keeps viewport bounded before intel panel renders */
+.wire-panel{background:var(--bg2);border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;overflow:hidden;height:480px}
+.wire-header{padding:9px 12px;border-bottom:1px solid var(--border);background:var(--bg3);display:flex;align-items:center;gap:6px;flex-shrink:0}
+.wire-viewport{overflow:hidden;flex:1;min-height:0}
+.wire-inner{display:flex;flex-direction:column;will-change:transform}
+.wire-item{padding:7px 10px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s}
+.wire-item:hover{background:var(--bg3)}
+.wire-item-src{font-size:9px;font-family:'JetBrains Mono',monospace;letter-spacing:.04em;margin-bottom:2px}
+.wire-item-src.ani{color:#e04444}.wire-item-src.pti{color:#22c55e}
+.wire-item-title{font-size:11px;color:var(--text2);line-height:1.45}
+.wire-item.w-high .wire-item-title{color:var(--red)}
+.wire-item.w-med  .wire-item-title{color:var(--amber)}
+@media(max-width:960px){.intel-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:600px){.intel-grid{grid-template-columns:1fr}.mid-row{flex-direction:column}}
 
 /* SCROLLBAR */
@@ -569,7 +573,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
       </div>
     </div>
 
-    <!-- INTEL GRID: Bankura | Statewide | Telegram Live -->
+    <!-- INTEL GRID: Bankura Intel | Statewide Intel | Wire Tracker -->
     <div class="intel-grid">
 
       <!-- LEFT: Bankura district intel -->
@@ -608,19 +612,21 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
         </div>
       </div>
 
-      <!-- RIGHT: Telegram Live Feed (Phase 3A placeholder) -->
-      <div class="tg-panel" id="telegramPanel">
-        <div class="tg-header">
-          <span style="font-size:14px">✈️</span>
-          <span style="font-size:13px;font-weight:600;flex:1">Telegram Live</span>
-          <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)" id="tgMeta">Phase 3A</span>
-        </div>
-        <div class="tg-body" id="telegramBody">
-          <div class="empty-state" style="text-align:center;padding:20px 12px">
-            <span class="empty-icon" style="font-size:26px">✈️</span>
-            <div style="font-size:12px;color:var(--text3);margin-top:8px;line-height:1.6">Telegram channel archiver<br>coming in <strong style="color:var(--text2)">Phase 3A</strong></div>
+      <!-- COL 3: ANI + PTI Wire Tracker -->
+        <div class="wire-panel" id="wirePanel">
+          <div class="wire-header">
+            <span style="font-size:12px">📰</span>
+            <span style="font-size:12px;font-weight:600;flex:1">Wire</span>
+            <span style="font-size:9px;font-family:'JetBrains Mono',monospace;color:var(--text3);margin-right:6px" id="wireMeta">ANI · PTI</span>
+            <button onclick="loadWire()" title="Refresh wire feed"
+              style="background:var(--bg3);border:1px solid var(--border);color:var(--text3);border-radius:4px;
+                     padding:2px 7px;font-size:11px;cursor:pointer;line-height:1.6"
+              onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text3)'">↻</button>
           </div>
-        </div>
+          <div class="wire-viewport" id="wireViewport">
+            <div class="wire-inner" id="wireInner"></div>
+          </div>
+
       </div>
 
     </div>
@@ -898,7 +904,9 @@ function toggleChip(idx){
 
 /* ─── CHARTS INIT ─── */
 function initCharts(){
-  var ctxT = document.getElementById('chartThreat').getContext('2d');
+  var elT = document.getElementById('chartThreat');
+  if(!elT) return;   // canvas removed from layout — skip chart init
+  var ctxT = elT.getContext('2d');
   chartThreat = new Chart(ctxT,{
     type:'line',
     data:{
@@ -925,7 +933,9 @@ function initCharts(){
     }
   });
 
-  var ctxB = document.getElementById('chartTopics').getContext('2d');
+  var elB = document.getElementById('chartTopics');
+  if(!elB) return;   // canvas removed — skip
+  var ctxB = elB.getContext('2d');
   chartTopics = new Chart(ctxB,{
     type:'bar',
     data:{
@@ -1253,6 +1263,7 @@ async function runFetch(manual){
       bankuraHtml+='</div>';
     }
     document.getElementById('analysisBankuraBody').innerHTML = bankuraHtml;
+    setTimeout(_matchWireHeight, 50); // re-match after content reflow
 
     // ── CENTRE PANEL: Statewide context ───────────────────────────────────
     var statewideHtml = '';
@@ -2198,6 +2209,84 @@ function exportDigests(){
   link.download = 'bankura_digest_'+new Date().toISOString().slice(0,10)+'.txt';
   link.click();
 }
+
+// ── ANI + PTI Wire Ticker ─────────────────────────────────────────────────────
+var _wireScrollTimer = null;
+var _wireOffset = 0;
+
+function _startWireScroll(){
+  clearInterval(_wireScrollTimer);
+  var inner = document.getElementById('wireInner');
+  var vp    = document.getElementById('wireViewport');
+  if(!inner || !vp) return;
+  var totalH = inner.offsetHeight;  // full list height
+  var vpH    = vp.offsetHeight;     // visible window height
+  if(totalH <= vpH){ return; }      // content fits — no scroll needed
+
+  // Pause on hover
+  vp.onmouseenter = function(){ clearInterval(_wireScrollTimer); };
+  vp.onmouseleave = function(){ _startWireScroll(); };
+
+  _wireScrollTimer = setInterval(function(){
+    _wireOffset += 0.6;                       // ~30px/s at 50ms interval
+    if(_wireOffset >= totalH - vpH + 20){
+      _wireOffset = 0;                        // snap back to top
+    }
+    inner.style.transform = 'translateY(-' + _wireOffset + 'px)';
+  }, 20);
+}
+
+function loadWire(){
+  var base = (window.location.protocol==='http:')
+    ? window.location.origin
+    : 'http://localhost:5055';
+  fetch(base + '/api/wire')
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      var items = data.items || [];
+      var meta  = document.getElementById('wireMeta');
+      if(meta) meta.textContent = 'ANI · PTI · ' + items.length + ' items';
+      if(!items.length){
+        if(!loadWire._retried){ loadWire._retried=true; setTimeout(loadWire,6000); }
+        return;
+      }
+      loadWire._retried = false;
+      function makeItem(it){
+        var cls = it.severity==='high' ? 'w-high' : (it.severity==='medium' ? 'w-med' : '');
+        var src = it.source.toLowerCase();
+        var safeUrl = (it.url||'').replace(/'/g,'%27');
+        return '<div class="wire-item '+cls+'" onclick="window.open(\''+safeUrl+'\',\'_blank\')">'
+          + '<div class="wire-item-src '+src+'">'+it.source+'</div>'
+          + '<div class="wire-item-title">'+(it.title||'').replace(/</g,'&lt;')+'</div>'
+          + '</div>';
+      }
+      var inner = document.getElementById('wireInner');
+      if(inner){
+        _wireOffset = 0;
+        inner.style.transform = 'translateY(0)';
+        inner.innerHTML = items.map(makeItem).join('');
+        // Match height to Bankura panel, then start scroll after paint
+        _matchWireHeight();
+        setTimeout(function(){ _matchWireHeight(); _startWireScroll(); }, 150);
+      }
+    })
+    .catch(function(){
+      if(!loadWire._retried){ loadWire._retried=true; setTimeout(loadWire,6000); }
+    });
+}
+
+function _matchWireHeight(){
+  // Update wire panel height to match Bankura Intel panel height
+  var ref  = document.getElementById('analysisBankura');
+  var wire = document.querySelector('.wire-panel');
+  if(!ref || !wire) return;
+  var h = ref.offsetHeight;
+  if(h > 50){ wire.style.height = h + 'px'; }
+}
+
+loadWire();                                    // direct call — DOM ready (script at bottom)
+setInterval(loadWire, 10 * 60 * 1000);        // re-fetch every 10 min
+
 
 // Poll sidebar counts every 2 min while page is open (catches background digests completing)
 setInterval(function(){
