@@ -87,7 +87,9 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 .trend-panel{background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:14px}
 .trend-header{padding:10px 14px;border-bottom:1px solid var(--border);background:var(--bg3);display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600}
 .trend-meta{margin-left:auto;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)}
-.trend-chart-wrap{padding:10px 14px 4px;height:110px}
+.trend-chart-wrap{padding:10px 14px 4px;height:110px;position:relative}
+@keyframes trendLivePulse{0%{box-shadow:0 0 0 0 rgba(220,38,38,.8);opacity:1}60%{box-shadow:0 0 0 7px rgba(220,38,38,0);opacity:.9}100%{box-shadow:0 0 0 0 rgba(220,38,38,0);opacity:1}}
+#trendBlinkDot{position:absolute;width:8px;height:8px;border-radius:50%;background:#dc2626;pointer-events:none;z-index:10;transform:translate(-50%,-50%);animation:trendLivePulse 1.5s ease-out infinite}
 .trend-legend{display:flex;gap:16px;padding:4px 14px 10px;font-size:11px;color:var(--text3);flex-wrap:wrap}
 .trend-legend span{display:flex;align-items:center;gap:5px}
 .trend-l-low::before,.trend-l-mod::before,.trend-l-high::before,.trend-l-alert::before,.trend-l-viol::before{content:'';width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:2px}
@@ -353,6 +355,12 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 .fig-headline a:hover{color:var(--accent)}
 .fig-headline .sev-badge{font-size:9px;font-family:'JetBrains Mono',monospace;padding:1px 5px;border-radius:6px;margin-right:4px}
 .fig-no-mention{font-size:11px;color:var(--text3);font-style:italic;padding:2px 0}
+/* Political figures monitor — compact mode */
+@keyframes figBlink{0%,100%{opacity:1}50%{opacity:.25}}
+.fig-new-badge{font-size:9px;font-family:'JetBrains Mono',monospace;font-weight:700;
+  padding:2px 8px;border-radius:10px;background:rgba(220,38,38,0.15);color:var(--red2);
+  border:1px solid rgba(220,38,38,0.35);animation:figBlink 2s ease-in-out infinite;
+  white-space:nowrap;margin-right:6px}
 /* Phase 3B — candidate news strip */
 .fig-news-strip{margin-top:6px;padding-top:6px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:3px}
 .fig-news-item{font-size:10px;color:var(--text3);text-decoration:none;display:block;padding:3px 6px;border-radius:4px;background:var(--bg4);line-height:1.4;transition:color .12s}
@@ -643,6 +651,8 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
         <div class="figure-monitor-header">
           <span style="font-size:14px">🕵️</span>
           <span style="font-size:13px;font-weight:600;flex:1">Political Figures Monitor</span>
+          <span id="figNewBadge" style="display:none"></span>
+          <button id="figHideTop" onclick="toggleHiddenFigures()" style="display:none;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3);background:none;border:1px solid var(--border);border-radius:6px;padding:2px 8px;cursor:pointer;white-space:nowrap">▴ hide</button>
           <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)" id="figMonitorMeta">Bankura district — key actors</span>
         </div>
         <div class="figure-monitor-grid" id="figureMonitorGrid">
@@ -1472,7 +1482,7 @@ var TREND_KEY    = 'wb_election_intel_trend_2026';
 var _trendChart  = null;
 
 function _loadTrend(){ try{ return JSON.parse(localStorage.getItem(TREND_KEY)||'[]'); }catch(e){ return []; } }
-function _saveTrend(arr){ try{ if(arr.length>30) arr=arr.slice(-30); localStorage.setItem(TREND_KEY,JSON.stringify(arr)); }catch(e){} }
+function _saveTrend(arr){ try{ localStorage.setItem(TREND_KEY,JSON.stringify(arr)); }catch(e){} }  // no cap — keep all cycles
 
 function saveTrendPoint(ts, parsed){
   if(!FEATURE_SENTIMENT_TREND) return;
@@ -1500,56 +1510,97 @@ function renderTrendChart(){
   var meta = document.getElementById('trendMeta');
   if(meta) meta.textContent = arr.length+' cycle'+(arr.length!==1?'s':'')+' stored';
 
-  var tlMap  = {LOW:1, MODERATE:2, HIGH:3, CRITICAL:4};
-  /* Shorten timestamps: "22 Mar, 09:30 am" → "09:30" */
-  var labels = arr.map(function(p){
-    var m = p.ts.match(/(\d+:\d+)/); return m ? m[1] : p.ts.slice(0,5);
+  var tlMap = {LOW:1, MODERATE:2, HIGH:3, CRITICAL:4};
+
+  /* ── Smart X labels: HH:MM within one day; date at day boundary when multi-day ── */
+  var multiDay = (function(){
+    if(arr.length < 2) return false;
+    var first = arr[0].iso  ? new Date(arr[0].iso)  : null;
+    var last  = arr[arr.length-1].iso ? new Date(arr[arr.length-1].iso) : null;
+    return first && last && (first.toDateString() !== last.toDateString());
+  })();
+
+  /* Full ISO timestamp stored per point for tooltip even in time-only mode */
+  var tooltipLabels = arr.map(function(p){
+    if(p.iso){ var d=new Date(p.iso); return d.toLocaleDateString('en-IN',{day:'numeric',month:'short'})+' '+d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true}); }
+    return p.ts||'';
   });
-  var tlVals     = arr.map(function(p){ return tlMap[p.threatLevel]||1; });
-  var alertVals  = arr.map(function(p){ return p.highAlerts||0; });
-  var violVals   = arr.map(function(p){ return p.violenceReports||0; });
-  var ptColors   = arr.map(function(p){
-    return p.threatLevel==='CRITICAL'||p.threatLevel==='HIGH' ? '#dc2626'
-         : p.threatLevel==='MODERATE' ? '#d97706' : '#16a34a';
+
+  var labels = arr.map(function(p, i){
+    if(!p.iso){
+      var m = p.ts ? p.ts.match(/(\d+:\d+)/) : null; return m ? m[1] : (p.ts||'').slice(0,5);
+    }
+    var d = new Date(p.iso);
+    if(!multiDay){
+      return d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true});
+    }
+    /* Multi-day: show "DD MMM" only at first point of each calendar day, blank otherwise */
+    if(i===0) return d.toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+    var prev = arr[i-1].iso ? new Date(arr[i-1].iso) : null;
+    if(!prev || prev.toDateString()!==d.toDateString())
+      return d.toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+    return '';
   });
+
+  var tlVals    = arr.map(function(p){ return tlMap[p.threatLevel]||1; });
+  var alertVals = arr.map(function(p){ return p.highAlerts||0; });
+  var violVals  = arr.map(function(p){ return p.violenceReports||0; });
+
+  /* Pad 3 null slots at the end so the line ends before the right edge */
+  var TAIL = 3;
+  var pLabels = labels.concat(['','','']);
+  var pTl     = tlVals.concat([null,null,null]);
+  var pAlert  = alertVals.concat([null,null,null]);
+  var pViol   = violVals.concat([null,null,null]);
 
   var canvas = document.getElementById('trendCanvas');
   if(!canvas) return;
 
-  if(_trendChart){
-    _trendChart.data.labels                             = labels;
-    _trendChart.data.datasets[0].data                  = tlVals;
-    _trendChart.data.datasets[0].pointBackgroundColor  = ptColors;
-    _trendChart.data.datasets[1].data                  = alertVals;
-    _trendChart.data.datasets[2].data                  = violVals;
+  /* Destroy & recreate when multi-day status flips (label format changes) */
+  var wasMultiDay = _trendChart && _trendChart._multiDay;
+  if(_trendChart && wasMultiDay === multiDay){
+    _trendChart.data.labels                 = pLabels;
+    _trendChart.data.datasets[0].data       = pTl;
+    _trendChart.data.datasets[1].data       = pAlert;
+    _trendChart.data.datasets[2].data       = pViol;
+    _trendChart._tooltipLabels              = tooltipLabels;
     _trendChart.update('none');
+    setTimeout(_placeTrendDot, 0);
     return;
   }
+  if(_trendChart){ _trendChart.destroy(); _trendChart = null; }
+
+  var xTickCfg = multiDay
+    ? { autoSkip:false, font:{size:9}, color:'#64748b', maxRotation:0 }
+    : { maxTicksLimit:10, font:{size:9}, color:'#64748b', maxRotation:0 };
 
   _trendChart = new Chart(canvas, {
     type: 'line',
     data: {
-      labels: labels,
+      labels: pLabels,
       datasets: [
-        { label:'Threat level',    data:tlVals,    yAxisID:'yT',
-          borderColor:'#2563eb',   backgroundColor:'rgba(37,99,235,0.07)',
-          pointBackgroundColor:ptColors, pointRadius:5, pointHoverRadius:7,
-          tension:0.35, fill:true },
-        { label:'High alerts',     data:alertVals, yAxisID:'yC',
+        { label:'Threat level',    data:pTl,       yAxisID:'yT',
+          borderColor:'#2563eb',   backgroundColor:'rgba(37,99,235,0.10)',
+          pointRadius:0, pointHoverRadius:5, pointHoverBackgroundColor:'#2563eb',
+          tension:0.45, cubicInterpolationMode:'monotone', fill:true, borderWidth:2 },
+        { label:'High alerts',     data:pAlert,    yAxisID:'yC',
           borderColor:'#d97706',   backgroundColor:'transparent',
-          pointRadius:3, tension:0.35, borderDash:[5,3] },
-        { label:'Violence reports',data:violVals,  yAxisID:'yC',
+          pointRadius:0, pointHoverRadius:4,
+          tension:0.45, cubicInterpolationMode:'monotone', borderDash:[5,3], borderWidth:1.5 },
+        { label:'Violence reports',data:pViol,     yAxisID:'yC',
           borderColor:'#dc2626',   backgroundColor:'transparent',
-          pointRadius:3, tension:0.35, borderDash:[2,3] },
+          pointRadius:0, pointHoverRadius:4,
+          tension:0.45, cubicInterpolationMode:'monotone', borderDash:[2,3], borderWidth:1.5 },
       ]
     },
     options:{
       responsive:true, maintainAspectRatio:false, animation:false,
+      interaction:{ mode:'index', intersect:false },
       plugins:{
         legend:{display:false},
         tooltip:{
           callbacks:{
-            title:function(c){ return c[0].label; },
+            title:function(c){ return tooltipLabels[c[0].dataIndex] || c[0].label; },
             label:function(c){
               if(c.datasetIndex===0){ return 'Threat: '+(['','LOW','MODERATE','HIGH','CRITICAL'][c.raw]||c.raw); }
               return c.dataset.label+': '+c.raw;
@@ -1558,18 +1609,45 @@ function renderTrendChart(){
         }
       },
       scales:{
-        x:{ ticks:{maxTicksLimit:8,font:{size:9},color:'#64748b',maxRotation:0},
-            grid:{color:'rgba(100,116,139,0.08)'} },
-        yT:{ type:'linear', position:'left',  min:0, max:5,
-             ticks:{stepSize:1,font:{size:9},color:'#64748b',
+        x:{ ticks:xTickCfg, grid:{color:'rgba(100,116,139,0.08)'} },
+        yT:{ type:'linear', position:'left', min:0, max:5,
+             ticks:{stepSize:1, font:{size:9}, color:'#64748b',
                     callback:function(v){ return ['','L','M','H','C',''][v]||''; }},
              grid:{color:'rgba(100,116,139,0.08)'} },
         yC:{ type:'linear', position:'right', min:0,
-             ticks:{maxTicksLimit:4,font:{size:9},color:'#64748b'},
+             ticks:{maxTicksLimit:4, font:{size:9}, color:'#64748b'},
              grid:{display:false} }
       }
     }
   });
+  _trendChart._multiDay       = multiDay;
+  _trendChart._tooltipLabels  = tooltipLabels;
+  setTimeout(_placeTrendDot, 0);  // wait one tick for Chart.js to finish layout
+}
+
+function _placeTrendDot(){
+  var chart = window._trendChart;
+  if(!chart) return;
+  var meta = chart.getDatasetMeta(0);
+  if(!meta || !meta.data.length) return;
+  /* Find last non-null point in dataset 0 */
+  var data = chart.data.datasets[0].data;
+  var lastIdx = -1;
+  for(var i = data.length - 1; i >= 0; i--){
+    if(data[i] !== null && data[i] !== undefined){ lastIdx = i; break; }
+  }
+  if(lastIdx < 0 || !meta.data[lastIdx]) return;
+  var pt  = meta.data[lastIdx];
+  var cvs = chart.canvas;
+  var dot = document.getElementById('trendBlinkDot');
+  if(!dot){
+    dot = document.createElement('span');
+    dot.id = 'trendBlinkDot';
+    cvs.parentElement.appendChild(dot);
+  }
+  dot.style.left    = (cvs.offsetLeft + pt.x) + 'px';
+  dot.style.top     = (cvs.offsetTop  + pt.y) + 'px';
+  dot.style.display = 'block';
 }
 
 /* On load: render sparkline if previous cycles are already stored */
@@ -1716,54 +1794,152 @@ function renderFigureMonitor(figureMentions){
     return (a.name||'').localeCompare(b.name||'');
   });
 
-  /* ── Split into visible (top 3 with mentions) and hidden (rest) ── */
-  var VISIBLE_MAX = 3;
-  var visible = sorted.slice(0, VISIBLE_MAX);
-  var hidden  = sorted.slice(VISIBLE_MAX);
+  /* ── Render ALL cards; _applyFigureVisibility shows top 3 + toggle ── */
+  grid.innerHTML = sorted.map(function(fig){
+    return makeCard(fig);
+  }).join('');
 
-  var html = visible.map(makeCard).join('');
+  _applyFigureVisibility();  // show top 3 active, hide rest behind toggle
+}
 
-  if(hidden.length){
-    var hiddenCards = hidden.map(makeCard).join('');
-    var noMentionCount = hidden.filter(function(f){ return !(f.count||0); }).length;
-    var label = hidden.length + ' more candidate' + (hidden.length!==1?'s':'') +
-                (noMentionCount === hidden.length ? ' — no recent mentions' : '') + ' ▾';
+/* ── Show top 4 active figure cards; hide the rest ────────────────────────── */
+var _prevTopFigures = [];   // names shown last time — used for blink detection
+var _figExpanded    = false; // tracks whether the "show more" section is open
 
-    html +=
-      '<div style="grid-column:1/-1;margin-top:2px">' +
-        '<button class="ctrl-btn" id="figMoreBtn" style="font-size:11px;padding:5px 12px;color:var(--text3);border-style:dashed" onclick="toggleHiddenFigures()">' +
-          '<span class="btn-icon">👥</span>' +
-          '<span id="figMoreLabel">'+label+'</span>' +
-        '</button>' +
-        '<div id="figHiddenWrap" style="display:none;margin-top:8px">' +
-          '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px">' +
-            hiddenCards +
-          '</div>' +
-        '</div>' +
-      '</div>';
+function _applyFigureVisibility(){
+  var grid = document.getElementById('figureMonitorGrid');
+  if(!grid) return;
+  var cards = Array.prototype.slice.call(grid.querySelectorAll('.fig-card'));
+  if(!cards.length) return;
+
+  // Score each card: LLM mentions (weight 2) + has news strip (weight 1)
+  cards.forEach(function(c){
+    var hasMention = !!c.querySelector('.fig-mention-count.has-mentions');
+    var hasNews    = !!c.querySelector('.fig-news-strip');
+    c._figScore = (hasMention ? 2 : 0) + (hasNews ? 1 : 0);
+  });
+
+  // Sort by score desc; ties retain existing order
+  cards.sort(function(a, b){ return b._figScore - a._figScore; });
+
+  // Top 3 always visible; if nothing has activity show top 2 as placeholder
+  var SHOW_MAX  = 3;
+  var hasActive = cards.some(function(c){ return c._figScore > 0; });
+  var showCount = hasActive ? SHOW_MAX : 2;
+
+  var topCards    = [];
+  var hiddenCards = [];
+  cards.forEach(function(c, i){
+    if(i < showCount){
+      topCards.push(c);
+    } else {
+      hiddenCards.push(c);
+    }
+  });
+
+  // Re-order DOM: top cards first (visible), then hidden cards
+  var nowTop = [];
+  topCards.forEach(function(c){
+    c.style.display = '';
+    nowTop.push(c.getAttribute('data-name') || '');
+    grid.appendChild(c);
+  });
+  hiddenCards.forEach(function(c){
+    c.style.display = _figExpanded ? '' : 'none';
+    grid.appendChild(c);
+  });
+
+  // Remove old toggle row, then re-insert if there are hidden cards
+  var oldToggle = document.getElementById('figToggleRow');
+  if(oldToggle) oldToggle.parentNode.removeChild(oldToggle);
+
+  if(hiddenCards.length){
+    var toggleRow = document.createElement('div');
+    toggleRow.id = 'figToggleRow';
+    toggleRow.style.cssText = 'grid-column:1/-1;margin-top:2px';
+
+    var hiddenActive = hiddenCards.filter(function(c){ return c._figScore > 0; }).length;
+    var labelOpen  = '▴ hide';
+    var labelClose = '👥 ' + hiddenCards.length + ' more candidate' +
+                     (hiddenCards.length !== 1 ? 's' : '') +
+                     (hiddenActive ? ' (' + hiddenActive + ' active)' : ' — no recent mentions') + ' ▾';
+
+    toggleRow.innerHTML =
+      '<button class="ctrl-btn" id="figMoreBtn" style="font-size:11px;padding:5px 12px;' +
+      'color:var(--text3);border-style:' + (_figExpanded ? 'solid' : 'dashed') + '" ' +
+      'onclick="toggleHiddenFigures()">' +
+        '<span id="figMoreLabel">' + (_figExpanded ? labelOpen : labelClose) + '</span>' +
+      '</button>';
+
+    grid.appendChild(toggleRow);
   }
 
-  grid.innerHTML = html;
+  // Update header meta
+  var activeCount = cards.filter(function(c){ return c._figScore > 0; }).length;
+  var metaEl = document.getElementById('figMonitorMeta');
+  if(metaEl){
+    metaEl.textContent = activeCount
+      ? activeCount + ' active · ' + cards.length + ' monitored'
+      : cards.length + ' candidates monitored';
+  }
+
+  // Blink badge if new names entered the top group
+  var newNames = nowTop.filter(function(n){ return n && _prevTopFigures.indexOf(n) === -1; });
+  if(newNames.length && _prevTopFigures.length){
+    _showFigNewBadge(newNames[0]);
+  }
+  _prevTopFigures = nowTop;
 }
 
 function toggleHiddenFigures(){
-  var wrap  = document.getElementById('figHiddenWrap');
-  var label = document.getElementById('figMoreLabel');
-  var btn   = document.getElementById('figMoreBtn');
-  if(!wrap) return;
-  var opening = (wrap.style.display === 'none');
-  wrap.style.display = opening ? 'block' : 'none';
-  if(btn) btn.style.borderStyle = opening ? 'solid' : 'dashed';
-  if(label){
-    if(opening){
-      label.textContent = label.textContent.replace('▾','▴').replace('no recent mentions','').trim();
-    } else {
-      var count = wrap.querySelectorAll('.fig-card').length;
-      var noMen = wrap.querySelectorAll('.fig-card .fig-mention-count:not(.has-mentions)').length;
-      label.textContent = count + ' more candidate' + (count!==1?'s':'') +
-                          (noMen===count ? ' — no recent mentions' : '') + ' ▾';
+  _figExpanded = !_figExpanded;
+  var grid = document.getElementById('figureMonitorGrid');
+  if(!grid) return;
+  // Show/hide all .fig-card elements that are not in the top group
+  var cards   = Array.prototype.slice.call(grid.querySelectorAll('.fig-card'));
+  var topNames = _prevTopFigures;
+  var hiddenCount = 0;
+  cards.forEach(function(c){
+    var name = c.getAttribute('data-name') || '';
+    if(topNames.indexOf(name) === -1){
+      c.style.display = _figExpanded ? '' : 'none';
+      hiddenCount++;
     }
+  });
+  // Update bottom toggle button appearance
+  var btn   = document.getElementById('figMoreBtn');
+  var label = document.getElementById('figMoreLabel');
+  if(btn)   btn.style.borderStyle = _figExpanded ? 'solid' : 'dashed';
+  if(label){
+    var hiddenActive = Array.prototype.filter.call(
+      grid.querySelectorAll('.fig-card'),
+      function(c){
+        return topNames.indexOf(c.getAttribute('data-name')||'') === -1 && c._figScore > 0;
+      }
+    ).length;
+    label.textContent = _figExpanded
+      ? '▴ hide'
+      : '👥 ' + hiddenCount + ' more candidate' + (hiddenCount !== 1 ? 's' : '') +
+        (hiddenActive ? ' (' + hiddenActive + ' active)' : ' — no recent mentions') + ' ▾';
   }
+  // Show/hide the header-level hide button
+  var hideTop = document.getElementById('figHideTop');
+  if(hideTop) hideTop.style.display = _figExpanded ? '' : 'none';
+}
+
+function _showFigNewBadge(name){
+  var badge = document.getElementById('figNewBadge');
+  if(!badge) return;
+  badge.className   = 'fig-new-badge';
+  badge.textContent = '● NEW · ' + (name || 'activity');
+  badge.style.display = '';
+  // Auto-dismiss after 30 s
+  clearTimeout(_showFigNewBadge._t);
+  _showFigNewBadge._t = setTimeout(function(){
+    badge.style.display = 'none';
+  }, 30000);
+  // Also dismiss on click
+  badge.onclick = function(){ badge.style.display = 'none'; };
 }
 
 /* ═══════ MEMORY SYSTEM ═══════ */
@@ -2329,29 +2505,8 @@ function loadFiguresNews(){
         card.insertAdjacentHTML('beforeend', html);
       });
 
-      // Re-sort visible cards: candidates with news strips first, then rest
-      var grid = document.getElementById('figureMonitorGrid');
-      if(grid){
-        var allCards = Array.prototype.slice.call(grid.querySelectorAll('.fig-card'));
-        allCards.sort(function(a, b){
-          var aHasNews = !!a.querySelector('.fig-news-strip') ? 1 : 0;
-          var bHasNews = !!b.querySelector('.fig-news-strip') ? 1 : 0;
-          if(aHasNews !== bHasNews) return bHasNews - aHasNews; // news first
-          // Secondary: LLM mention count (cards with has-mentions class)
-          var aHasMention = a.querySelector('.fig-mention-count.has-mentions') ? 1 : 0;
-          var bHasMention = b.querySelector('.fig-mention-count.has-mentions') ? 1 : 0;
-          return bHasMention - aHasMention;
-        });
-        allCards.forEach(function(c){ grid.appendChild(c); }); // re-append in sorted order
-      }
-
-      // Update meta label on figure monitor header
-      var total = names.reduce(function(s,n){ return s+(figures[n]?figures[n].length:0); },0);
-      var metaEl = document.getElementById('figMonitorMeta');
-      if(metaEl){
-        var base = metaEl.textContent.replace(/\s·\s\d+ news.*$/, '');
-        metaEl.textContent = base + ' · ' + total + ' news items';
-      }
+      // Re-score and re-show top 4 (news strips now injected, scores updated)
+      _applyFigureVisibility();
     })
     .catch(function(){});   // silent fail — figures card works without this
 }
