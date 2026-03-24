@@ -2328,6 +2328,23 @@ function loadFiguresNews(){
           + '</div>';
         card.insertAdjacentHTML('beforeend', html);
       });
+
+      // Re-sort visible cards: candidates with news strips first, then rest
+      var grid = document.getElementById('figureMonitorGrid');
+      if(grid){
+        var allCards = Array.prototype.slice.call(grid.querySelectorAll('.fig-card'));
+        allCards.sort(function(a, b){
+          var aHasNews = !!a.querySelector('.fig-news-strip') ? 1 : 0;
+          var bHasNews = !!b.querySelector('.fig-news-strip') ? 1 : 0;
+          if(aHasNews !== bHasNews) return bHasNews - aHasNews; // news first
+          // Secondary: LLM mention count (cards with has-mentions class)
+          var aHasMention = a.querySelector('.fig-mention-count.has-mentions') ? 1 : 0;
+          var bHasMention = b.querySelector('.fig-mention-count.has-mentions') ? 1 : 0;
+          return bHasMention - aHasMention;
+        });
+        allCards.forEach(function(c){ grid.appendChild(c); }); // re-append in sorted order
+      }
+
       // Update meta label on figure monitor header
       var total = names.reduce(function(s,n){ return s+(figures[n]?figures[n].length:0); },0);
       var metaEl = document.getElementById('figMonitorMeta');
