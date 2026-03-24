@@ -111,8 +111,11 @@ def _save_digest_candidates(panel_items):
             url = (item.get("url") or "").strip()
             if not url or url in seen_urls:
                 continue
-            # Drop YouTube links — video thumbnails, not digestible text articles
-            if "youtube.com" in url or "youtu.be" in url:
+            # Drop YouTube — video thumbnails have no digestible text.
+            # Check both URL (direct links) and source field (Google News redirects
+            # to YouTube return source="YouTube" in the RSS <source> element).
+            src = item.get("source", "")
+            if "youtube.com" in url or "youtu.be" in url or src == "YouTube":
                 continue
             sev = _score_severity(item.get("title","") + " " + item.get("desc",""))
             if sev not in ("high", "medium"):
