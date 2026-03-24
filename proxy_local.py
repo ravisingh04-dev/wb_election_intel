@@ -1816,7 +1816,7 @@ def _format_brief_telegram(parsed, trigger, ts):
         "official":  "Official",
         "parties":   "Parties",
     }
-    SEV_EMOJI = {"high": "🔴", "medium": "🟡"}
+    SEV_EMOJI = {"high": "‼️", "medium": "❗"}
 
     # ── Collect HIGH + MEDIUM items from past 24h ──────────────────────────
     alert_lines = []
@@ -1830,7 +1830,7 @@ def _format_brief_telegram(parsed, trigger, ts):
             summary = (item.get("summary") or "").strip()
             source  = (item.get("source") or "").strip()
             t_label = item.get("time", "")
-            line = f"{SEV_EMOJI[sev]} [{label}] {summary}"
+            line = f"{SEV_EMOJI[sev]} {summary}"
             if source:
                 line += f" — <i>{source}</i>"
             if t_label:
@@ -1842,20 +1842,21 @@ def _format_brief_telegram(parsed, trigger, ts):
 
     # Header
     sections.append(
-        f"📍 <b>WB Intel — Bankura District Observer</b>\n"
-        f"<b>{trigger_label}</b>  |  {ts}\n"
-        f"{tl_emoji} <b>{tl}</b>  |  Signals: {m.get('totalSignals',0)}  |  High alerts: {m.get('highAlerts',0)}"
+        f"<b>Election Updates - Bankura &amp; WB</b>\n"
+        f"<i>— Last 24 hours —</i>\n"
+        f"{ts}\n"
+        f"<b>{tl}</b>  |  Signals: {m.get('totalSignals',0)}  |  High: {m.get('highAlerts',0)}"
     )
 
     # Active alerts
     if alert_lines:
         sections.append(
-            "<b>━━━ ACTIVE ALERTS (HIGH/MEDIUM · 24h) ━━━</b>\n" +
-            "\n".join(alert_lines)
+            "<b>━━━ ACTIVE ALERTS (HIGH/MEDIUM) ━━━</b>\n\n" +
+            "\n\n".join(alert_lines)
         )
     else:
         sections.append(
-            "<b>━━━ ACTIVE ALERTS (HIGH/MEDIUM · 24h) ━━━</b>\n"
+            "<b>━━━ ACTIVE ALERTS (HIGH/MEDIUM) ━━━</b>\n\n"
             "No high or medium alerts in the past 24 hours."
         )
 
@@ -1889,7 +1890,7 @@ def _format_brief_telegram(parsed, trigger, ts):
         sections.append(f"⚠️ <b>DISINFO:</b> {disinfo}")
 
     # Disclaimer (always last)
-    sections.append("⚠️ <i>AI-generated · unverified · cross-check before acting</i>")
+    sections.append("⚠️ <i>AI-generated · cross-check before acting</i>")
 
     # ── Split into ≤4000-char parts at section boundaries ─────────────────
     parts   = []
