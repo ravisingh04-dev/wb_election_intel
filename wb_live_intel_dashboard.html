@@ -438,7 +438,6 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
     <div class="pulse-dot" id="liveDot"></div>
     <span class="status-label" id="statusLabel">STANDBY</span>
     <div class="sep"></div>
-    <div class="next-refresh" id="nextRefreshDisplay">Next: --:--</div>
     <div class="mode-badge mode-normal" id="modeBadge" onclick="toggleMode()">NORMAL MODE</div>
     <button class="theme-toggle" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle dark/light mode">☀️ Light</button>
     <div class="clock-display" id="clock"></div>
@@ -461,18 +460,27 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
     </div>
 
     <div class="sidebar-section">
-      <div class="sid-label">Refresh interval</div>
+      <div class="sid-label">Memory &amp; timeline</div>
+      <button class="ctrl-btn" onclick="openTimeline()">
+        <span class="btn-icon">📜</span> View election timeline
+      </button>
+      <button class="ctrl-btn" onclick="openVideoExport()">
+        <span class="btn-icon">🎬</span> Export as video
+      </button>
       <div class="stat-mini">
-        <div class="stat-mini-val" id="intervalDisplay" style="color:var(--accent2)">30 min</div>
-        <div class="stat-mini-lbl">Auto-refresh (normal mode)</div>
+        <div class="stat-mini-val" id="memCount" style="color:var(--purple)">0</div>
+        <div class="stat-mini-lbl">Cycles stored in memory</div>
       </div>
+      <button class="ctrl-btn tl-danger" style="font-size:11px;padding:6px 10px" onclick="clearMemory()">
+        <span class="btn-icon">🗑</span> Clear stored memory
+      </button>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sid-label">Last run</div>
       <div class="stat-mini">
-        <div class="stat-mini-val" id="cycleCount" style="color:var(--green2)">0</div>
-        <div class="stat-mini-lbl">Analysis cycles run</div>
-      </div>
-      <div class="stat-mini">
-        <div class="stat-mini-val" id="alertCount" style="color:var(--red2)">0</div>
-        <div class="stat-mini-lbl">High-priority alerts</div>
+        <div class="stat-mini-val" style="font-size:13px;color:var(--text2)" id="lastRunTime">Never</div>
+        <div class="stat-mini-lbl">Last successful fetch</div>
       </div>
     </div>
 
@@ -530,31 +538,6 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
       </div>
     </div>
 
-    <div class="sidebar-section">
-      <div class="sid-label">Memory &amp; timeline</div>
-      <button class="ctrl-btn" onclick="openTimeline()">
-        <span class="btn-icon">📜</span> View election timeline
-      </button>
-      <button class="ctrl-btn" onclick="openVideoExport()">
-        <span class="btn-icon">🎬</span> Export as video
-      </button>
-      <div class="stat-mini">
-        <div class="stat-mini-val" id="memCount" style="color:var(--purple)">0</div>
-        <div class="stat-mini-lbl">Cycles stored in memory</div>
-      </div>
-      <button class="ctrl-btn tl-danger" style="font-size:11px;padding:6px 10px" onclick="clearMemory()">
-        <span class="btn-icon">🗑</span> Clear stored memory
-      </button>
-    </div>
-
-    <div class="sidebar-section">
-      <div class="sid-label">Last run</div>
-      <div class="stat-mini">
-        <div class="stat-mini-val" style="font-size:13px;color:var(--text2)" id="lastRunTime">Never</div>
-        <div class="stat-mini-lbl">Last successful fetch</div>
-      </div>
-    </div>
-
     <!-- TURNOUT MANUAL ENTRY (shown in election day mode) -->
     <div class="sidebar-section" id="turnoutManualSection" style="display:none">
       <div class="sid-label">🗳️ Manual Turnout Entry</div>
@@ -591,29 +574,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
         <span class="btn-icon">▶</span> Send now (test)
       </button>
 
-      <!-- Telegram setup -->
-      <div style="margin-top:8px;padding:7px 8px;background:var(--bg3);border-radius:6px;border:1px solid var(--border)">
-        <div style="font-size:9px;font-weight:600;color:var(--accent2);margin-bottom:5px;letter-spacing:.05em">TELEGRAM BOT</div>
-
-        <div style="font-size:9px;color:var(--text3);margin-bottom:4px;line-height:1.5">
-          1. Message <code style="color:var(--accent2)">@BotFather</code> → <code>/newbot</code> → copy token<br>
-          2. Open your bot → send <code>/start</code><br>
-          3. Paste token below → click Auto-detect
-        </div>
-
-        <div style="font-size:10px;color:var(--text3);margin-bottom:2px">Bot token</div>
-        <input type="password" id="briefingTgToken" placeholder="123456:ABCdef…"
-          style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 6px;font-size:11px;font-family:'JetBrains Mono',monospace;margin-bottom:5px">
-
-        <div style="font-size:10px;color:var(--text3);margin-bottom:2px">Chat ID</div>
-        <div style="display:flex;gap:4px;align-items:center">
-          <input type="text" id="briefingTgChatId" placeholder="auto-detect or paste"
-            style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 6px;font-size:11px;font-family:'JetBrains Mono',monospace">
-          <button onclick="detectTelegramChatId()" title="Auto-detect chat ID from recent messages"
-            style="padding:4px 7px;background:var(--accent2);color:#000;border:none;border-radius:4px;cursor:pointer;font-size:10px;font-weight:700;white-space:nowrap">Auto</button>
-        </div>
-        <div id="briefingTgDetectStatus" style="font-size:9px;color:var(--green2);min-height:12px;margin-top:2px"></div>
-      </div>
+      <!-- Telegram token/chat-id configured in telegram_config.json (read by proxy on startup) -->
 
       <div style="margin-top:6px;display:flex;gap:5px;align-items:center">
         <div style="font-size:10px;color:var(--text3);white-space:nowrap">Daily at</div>
@@ -632,14 +593,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
         <div style="font-size:9px;color:var(--text3);margin-left:2px">escalate</div>
       </div>
 
-      <div style="margin-top:8px;padding:6px 8px;background:var(--bg3);border-radius:6px;border:1px solid var(--border)">
-        <div style="font-size:9px;font-weight:600;color:var(--text3);margin-bottom:4px;letter-spacing:.05em">SMS FALLBACK</div>
-        <div style="font-size:9px;color:var(--text3);margin-bottom:4px">Fast2SMS — requires API key.<br>Currently <strong style="color:var(--amber)">inactive</strong> (key not configured).</div>
-        <input type="password" id="briefingSmsKey" placeholder="Fast2SMS API key"
-          style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 6px;font-size:11px;margin-bottom:4px">
-        <input type="tel" id="briefingSmsPhone" placeholder="+91XXXXXXXXXX"
-          style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 6px;font-size:11px">
-      </div>
+      <!-- Fast2SMS removed — not in use -->
 
       <button class="ctrl-btn" onclick="saveBriefingConfig()" style="margin-top:6px;font-size:11px;padding:6px 10px">
         <span class="btn-icon">✓</span> Save settings
@@ -1267,15 +1221,14 @@ function toggleMode(){
   isElectionMode = !isElectionMode;
   var badge = document.getElementById('modeBadge');
   var btn   = document.getElementById('modeToggleBtn');
-  var intD  = document.getElementById('intervalDisplay');
   if(isElectionMode){
     badge.textContent='ELECTION DAY'; badge.className='mode-badge mode-election';
     btn.innerHTML='🔵 Switch to Normal Mode';
-    intD.textContent='15 min'; progressDuration=REFRESH_ELECTION;
+    progressDuration=REFRESH_ELECTION;
   } else {
     badge.textContent='NORMAL MODE'; badge.className='mode-badge';
     btn.innerHTML='🚨 Election Day Mode';
-    intD.textContent='30 min'; progressDuration=REFRESH_NORMAL;
+    progressDuration=REFRESH_NORMAL;
   }
   scheduleNext();
 }
@@ -1297,8 +1250,7 @@ function updateCountdown(){
   var remaining = Math.max(0, nextRefreshAt - Date.now());
   var mins = Math.floor(remaining / 60000);
   var secs = Math.floor((remaining % 60000) / 1000);
-  document.getElementById('nextRefreshDisplay').textContent =
-    'Next: '+String(mins).padStart(2,'0')+':'+String(secs).padStart(2,'0');
+  // nextRefreshDisplay removed from UI
   if(progressStart){
     var pct = Math.min(100, ((Date.now()-progressStart)/progressDuration)*100);
     document.getElementById('progressBar').style.width = pct+'%';
@@ -1410,7 +1362,6 @@ async function runFetch(manual){
   setStatus('FETCHING RSS…','#fbbf24');
   document.getElementById('progressBar').style.width='10%';
   cycleCount++;
-  document.getElementById('cycleCount').textContent = cycleCount;
   var now = new Date();
   var ts  = now.toLocaleString('en-IN');
 
@@ -1437,7 +1388,6 @@ async function runFetch(manual){
     document.getElementById('mThreatTrend').textContent = ts;
 
     alertCount += (m.highAlerts||0);
-    document.getElementById('alertCount').textContent = alertCount;
 
     renderFeedItems('fbBankura',  parsed.bankura);
     renderFeedItems('fbSurrounds',parsed.surrounds);

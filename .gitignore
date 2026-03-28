@@ -1,0 +1,49 @@
+# API key — never share this
+.api_key
+
+# macOS
+.DS_Store
+__MACOSX/
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Exported data files (keep locally, don't commit)
+bankura_election_intel_*.json
+bankura_election_intel_*.csv
+bankura_election_timeline_video_*.html
+
+# Generated media — large files, keep locally only
+*.mp3
+*.mp4
+*.pdf
+*.pptx
+frames/
+dashboard_screenshot.png
+
+# Claude Code internal
+.claude/
+CLAUDE_CODE_HANDOFF.md
+
+# Legacy / superseded files
+proxy.py
+
+# Python virtual environment
+venv/
+.venv/
+env/
+
+# SQLite databases (runtime data)
+*.db
+*.sqlite
+
+# Environment variables (API keys)
+.env
+*.session
+tg_session*

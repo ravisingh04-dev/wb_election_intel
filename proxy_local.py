@@ -40,7 +40,8 @@ FEATURE_DIGEST   = True   # background LLM digest of MED/HIGH articles
 
 _wire_cache = {"ts": 0.0, "items": []}   # ANI+PTI wire feed cache (10-min TTL)
 
-DB_PATH  = SCRIPT_DIR / "bankura_intel.db"
+DB_PATH              = SCRIPT_DIR / "bankura_intel.db"
+TELEGRAM_CONFIG_FILE = SCRIPT_DIR / "telegram_config.json"
 _db_lock = threading.Lock()   # single write-lock for all DB operations
 
 # ─── SQLite helpers ───────────────────────────────────────────────────────────
@@ -1717,30 +1718,108 @@ _BRIEFING_DEFAULTS = {
 }
 
 def _load_briefing_config():
-    """Return briefing config dict (DB values merged over defaults)."""
+    """Return briefing config dict (DB values merged over defaults, file overrides for telegram)."""
     cfg = dict(_BRIEFING_DEFAULTS)
-    if not FEATURE_SQLITE:
-        return cfg
-    try:
-        with _db_lock:
-            c = _db_conn()
-            rows = c.execute("SELECT key, value FROM briefing_config").fetchall()
-            c.close()
-        for row in rows:
-            cfg[row["key"]] = row["value"]
-    except Exception:
-        pass
+    if FEATURE_SQLITE:
+        try:
+            with _db_lock:
+                c = _db_conn()
+                rows = c.execute("SELECT key, value FROM briefing_config").fetchall()
+                c.close()
+            for row in rows:
+                cfg[row["key"]] = row["value"]
+        except Exception:
+            pass
+    # telegram_config.json takes precedence for credentials
+    tg = _load_telegram_file()
+    if tg.get("telegram_bot_token"):
+        cfg["telegram_bot_token"] = tg["telegram_bot_token"]
+    if tg.get("telegram_chat_id"):
+        cfg["telegram_chat_id"] = tg["telegram_chat_id"]
     return cfg
 
 def _save_briefing_config(updates):
-    """Persist a dict of key→value pairs into briefing_config table."""
-    if not FEATURE_SQLITE:
+    """Persist a dict of key→value pairs into briefing_config table and telegram_config.json."""
+    if FEATURE_SQLITE:
+        with _db_lock:
+            c = _db_conn()
+            for k, v in updates.items():
+                c.execute("INSERT OR REPLACE INTO briefing_config(key,value) VALUES(?,?)", (k, str(v)))
+            c.commit(); c.close()
+    # Mirror telegram credentials to the JSON file
+    token  = updates.get("telegram_bot_token")
+    chatid = updates.get("telegram_chat_id")
+    if token or chatid:
+        _save_telegram_file(token, chatid)
+
+# ── Telegram config file helpers ──────────────────────────────────────────────
+
+def _load_telegram_file():
+    """Read telegram_config.json; return {} if missing or invalid."""
+    try:
+        if TELEGRAM_CONFIG_FILE.exists():
+            return json.loads(TELEGRAM_CONFIG_FILE.read_text())
+    except Exception:
+        pass
+    return {}
+
+def _save_telegram_file(token=None, chat_id=None):
+    """Write token and/or chat_id to telegram_config.json (preserves other keys)."""
+    try:
+        data = _load_telegram_file()
+        if token:
+            data["telegram_bot_token"] = token
+        if chat_id:
+            data["telegram_chat_id"] = chat_id
+        TELEGRAM_CONFIG_FILE.write_text(json.dumps(data, indent=2))
+        try:
+            TELEGRAM_CONFIG_FILE.chmod(0o600)
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"  [telegram] Could not write config file: {e}")
+
+def _startup_telegram_check():
+    """On proxy start: load telegram_config.json, auto-detect chat_id if missing."""
+    tg      = _load_telegram_file()
+    token   = tg.get("telegram_bot_token", "").strip()
+    chat_id = tg.get("telegram_chat_id", "").strip()
+
+    if not token:
+        print("  [telegram] No token in telegram_config.json — briefing inactive.")
+        print("             Create telegram_config.json with {\"telegram_bot_token\": \"...\"}.")
         return
-    with _db_lock:
-        c = _db_conn()
-        for k, v in updates.items():
-            c.execute("INSERT OR REPLACE INTO briefing_config(key,value) VALUES(?,?)", (k, str(v)))
-        c.commit(); c.close()
+
+    print(f"  [telegram] Token loaded: {token[:16]}…")
+
+    if not chat_id:
+        print("  [telegram] Chat ID missing — attempting auto-detect via getUpdates…")
+        try:
+            url = f"https://api.telegram.org/bot{token}/getUpdates?limit=20&timeout=5"
+            with urllib.request.urlopen(url, timeout=10) as r:
+                data = json.loads(r.read())
+            results = data.get("result", [])
+            found_id, found_title = "", ""
+            for update in reversed(results):
+                for key in ("message", "channel_post", "my_chat_member"):
+                    if key in update:
+                        chat_obj = (update[key].get("chat") or {})
+                        found_id    = str(chat_obj.get("id", ""))
+                        found_title = chat_obj.get("title") or chat_obj.get("username") or ""
+                        break
+                if found_id:
+                    break
+            if found_id:
+                _save_telegram_file(chat_id=found_id)
+                _save_briefing_config({"telegram_chat_id": found_id})
+                print(f"  [telegram] Chat ID detected: {found_id} ({found_title})")
+            else:
+                print("  [telegram] No updates found — send /start to your bot first, then restart.")
+        except Exception as e:
+            print(f"  [telegram] Auto-detect failed: {e}")
+    else:
+        print(f"  [telegram] Chat ID: {chat_id}")
+        _save_briefing_config({"telegram_bot_token": token, "telegram_chat_id": chat_id})
 
 def _briefing_already_sent(trigger, cycle_id, threat_level):
     """Return True if an identical briefing was already sent for this cycle."""
@@ -2597,10 +2676,7 @@ class Handler(BaseHTTPRequestHandler):
                     sql = ("SELECT id,url,title,source,severity,panel,"
                            "published_at,first_seen,digest,digest_status,digested_at "
                            "FROM digested_articles WHERE " + " AND ".join(where) +
-                           " ORDER BY CASE severity WHEN 'high' THEN 1 ELSE 2 END,"
-                           " CASE panel WHEN 'bankura' THEN 1 WHEN 'alerts' THEN 2"
-                           "            WHEN 'surrounds' THEN 3 ELSE 4 END,"
-                           " first_seen DESC LIMIT 300")
+                           " ORDER BY first_seen DESC LIMIT 300")
                     rows   = [dict(r) for r in c.execute(sql, args).fetchall()]
                     stats  = dict(c.execute("""
                         SELECT digest_status, COUNT(*) as n
@@ -3108,6 +3184,9 @@ def main():
     _db_init()
     _start_digest_worker(ollama_base=f"http://localhost:11434", model=model)
 
+    # ── Telegram: load config file, auto-detect chat_id if needed ────────────
+    _startup_telegram_check()
+
     # ── Phase 4B: start daily briefing scheduler ──────────────────────────────
     _start_briefing_scheduler()
 
@@ -3154,7 +3233,14 @@ def main():
     threading.Thread(target=_figures_refresh_loop, daemon=True, name="figures-refresh").start()
 
 
-    server = QuietHTTPServer(("127.0.0.1", port), Handler)
+    # Bind dual-stack (IPv4 + IPv6) so browsers that resolve localhost→::1 can connect
+    import socket as _socket
+    class _DualStackServer(QuietHTTPServer):
+        address_family = _socket.AF_INET6
+        def server_bind(self):
+            self.socket.setsockopt(_socket.IPPROTO_IPV6, _socket.IPV6_V6ONLY, 0)
+            super().server_bind()
+    server = _DualStackServer(("::", port), Handler)
 
     if not args.no_browser:
         threading.Timer(0.9, lambda: webbrowser.open(f"http://localhost:{port}")).start()
