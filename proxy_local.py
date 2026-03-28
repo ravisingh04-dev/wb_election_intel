@@ -2690,6 +2690,34 @@ class Handler(BaseHTTPRequestHandler):
             self._cors(); self.end_headers()
             self.wfile.write(body)
 
+        elif path == "/api/latest-cycle":
+            # GET /api/latest-cycle — most recent completed LLM cycle from DB
+            row = None
+            if FEATURE_SQLITE:
+                try:
+                    with _db_lock:
+                        c = _db_conn()
+                        row = c.execute(
+                            "SELECT full_json, fetched_at, threat_level FROM cycles ORDER BY id DESC LIMIT 1"
+                        ).fetchone()
+                        c.close()
+                except Exception:
+                    pass
+            if row:
+                try:
+                    payload = json.loads(row["full_json"])
+                    payload["_fetched_at"] = row["fetched_at"]
+                    payload["_threat_level"] = row["threat_level"]
+                    body = json.dumps(payload).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors(); self.end_headers()
+                    self.wfile.write(body)
+                except Exception:
+                    self.send_response(204); self._cors(); self.end_headers()
+            else:
+                self.send_response(204); self._cors(); self.end_headers()
+
         elif path == "/api/wire":
             # GET /api/wire — ANI + PTI West Bengal wire feed (cached 10 min)
             try:

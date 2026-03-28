@@ -27,6 +27,12 @@ bankura_election_timeline_video_*.html
 frames/
 dashboard_screenshot.png
 
+# Runtime logs
+*.log
+
+# Telegram credentials
+telegram_config.json
+
 # Claude Code internal
 .claude/
 CLAUDE_CODE_HANDOFF.md

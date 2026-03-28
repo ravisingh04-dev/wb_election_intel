@@ -1809,11 +1809,102 @@ document.addEventListener('DOMContentLoaded', function(){
 });
 
 
+/* ═══════ LOAD LATEST CACHED CYCLE ═══════ */
+
+function applyParsedCycle(parsed, label){
+  if(!parsed) return;
+  var m  = parsed.metrics || {};
+  var an = parsed.analysis || {};
+  var ts = parsed._fetched_at
+    ? new Date(parsed._fetched_at).toLocaleString('en-IN')
+    : new Date().toLocaleString('en-IN');
+
+  document.getElementById('mTotalSignals').textContent = m.totalSignals || 0;
+  document.getElementById('mHighAlert').textContent    = m.highAlerts   || 0;
+  document.getElementById('mViolence').textContent     = m.violenceReports || 0;
+  document.getElementById('mTotalTrend').textContent   = ts;
+  var tl   = (m.threatLevel || 'LOW').toUpperCase();
+  var tlEl = document.getElementById('mThreat');
+  tlEl.textContent = tl;
+  tlEl.style.color = tl==='CRITICAL'||tl==='HIGH' ? 'var(--red)' : tl==='MODERATE' ? 'var(--amber)' : 'var(--green)';
+  document.getElementById('mThreatTrend').textContent = ts;
+
+  renderFeedItems('fbBankura',  parsed.bankura);
+  renderFeedItems('fbSurrounds',parsed.surrounds);
+  renderFeedItems('fbWB',       parsed.statewide);
+  renderFeedItems('fbParties',  parsed.parties);
+  renderFeedItems('fbAlerts',   parsed.alerts);
+  renderFeedItems('fbMCC',      parsed.official);
+  renderFeedItems('fbBangla',   parsed.bangla);
+
+  var bankuraHtml = '';
+  bankuraHtml += '<div class="section"><div class="sec-title">Situation headline</div><p class="highlight">'+(an.headline||'No headline')+'</p></div>';
+  bankuraHtml += '<div class="section"><div class="sec-title">Bankura district</div><p>'+(an.bankuraSituation||'—')+'</p></div>';
+  if(an.keyRisks&&an.keyRisks.length){
+    bankuraHtml+='<div class="section"><div class="sec-title">Key risks</div>';
+    an.keyRisks.forEach(function(r){ bankuraHtml+='<p class="risk">▸ '+r+'</p>'; });
+    bankuraHtml+='</div>';
+  }
+  if(an.observerActions&&an.observerActions.length){
+    bankuraHtml+='<div class="section"><div class="sec-title">Observer actions</div>';
+    an.observerActions.forEach(function(a){ bankuraHtml+='<p class="safe">✓ '+a+'</p>'; });
+    bankuraHtml+='</div>';
+  }
+  document.getElementById('analysisBankuraBody').innerHTML = bankuraHtml;
+  setTimeout(_matchWireHeight, 50);
+
+  var statewideHtml = '';
+  statewideHtml += '<div class="section"><div class="sec-title">Surrounding districts</div><p>'+(an.surroundingSituation||'—')+'</p></div>';
+  if(an.partyPositions){
+    statewideHtml += '<div class="section"><div class="sec-title">Party positions &amp; allegations</div><p style="color:var(--purple)">'+(an.partyPositions||'—')+'</p></div>';
+  }
+  statewideHtml+='<div class="section"><div class="sec-title">Disinfo watch</div><p>'+(an.disinfoAlerts||'None detected')+'</p></div>';
+  statewideHtml+='<div class="section"><div class="sec-title">Overall assessment</div><p>'+(an.overallAssessment||'—')+'</p></div>';
+  document.getElementById('analysisStatewideBody').innerHTML = statewideHtml;
+  document.getElementById('analysisTimestamp').textContent = label + ts;
+
+  if(tl!=='LOW'){
+    document.getElementById('alertBanner').classList.add('show');
+    document.getElementById('alertBannerText').textContent = '⚠️ '+(an.headline||'High-priority situation')+' — See analysis below.';
+  }
+  setStatus('CACHED','#94a3b8');
+}
+
+var _cacheAgeMs = null;   // set by loadLatestCycle; used to skip immediate LLM call
+
+async function loadLatestCycle(){
+  try{
+    var base = (location.protocol==='http:'||location.protocol==='https:')
+      ? location.origin : 'http://localhost:5050';
+    var r = await fetch(base + '/api/latest-cycle');
+    if(r.status === 204) return;   // no cycle saved yet
+    var data = await r.json();
+    if(data && data.metrics){
+      applyParsedCycle(data, 'Cached ');
+      if(data._fetched_at){
+        _cacheAgeMs = Date.now() - new Date(data._fetched_at).getTime();
+      }
+    }
+  } catch(e){ /* no cached data — wait for LLM */ }
+}
+
 /* ═══════ AUTO-START + VISIBILITY CATCH-UP ═══════ */
 
-// 1. Auto-start: run first fetch automatically when page loads
+var CACHE_FRESH_MS = 5 * 60 * 1000;  // 5 minutes
+
+// 1. Auto-start: load cached cycle immediately; skip LLM fetch if cache < 5 min old
 document.addEventListener('DOMContentLoaded', function(){
-  setTimeout(function(){ runFetch(false); }, 1200); // slight delay so DOM settles
+  loadLatestCycle().then(function(){
+    if(_cacheAgeMs !== null && _cacheAgeMs < CACHE_FRESH_MS){
+      // Cache is fresh — schedule next fetch for remainder of the interval
+      var delayMs = Math.max(10000, CACHE_FRESH_MS - _cacheAgeMs);
+      console.log('[init] Cache is ' + Math.round(_cacheAgeMs/1000) + 's old — deferring LLM fetch by ' + Math.round(delayMs/1000) + 's');
+      setStatus('CACHED','#94a3b8');
+      refreshTimer = setTimeout(function(){ runFetch(false); }, delayMs);
+    } else {
+      setTimeout(function(){ runFetch(false); }, 1200);
+    }
+  });
 });
 
 // 2. Page Visibility API — tab comes back from background/sleep
