@@ -1894,14 +1894,20 @@ var CACHE_FRESH_MS = 5 * 60 * 1000;  // 5 minutes
 
 // 1. Auto-start: load cached cycle immediately; skip LLM fetch if cache < 5 min old
 document.addEventListener('DOMContentLoaded', function(){
+  // First load in this browser tab session always fires LLM immediately.
+  // Subsequent reloads within the same tab session use the 5-min defer logic.
+  var isFirstLoad = !sessionStorage.getItem('wb_intel_session_started');
+  sessionStorage.setItem('wb_intel_session_started', '1');
+
   loadLatestCycle().then(function(){
-    if(_cacheAgeMs !== null && _cacheAgeMs < CACHE_FRESH_MS){
-      // Cache is fresh — schedule next fetch for remainder of the interval
+    if(!isFirstLoad && _cacheAgeMs !== null && _cacheAgeMs < CACHE_FRESH_MS){
+      // Cache is fresh and not the first load — defer until interval expires
       var delayMs = Math.max(10000, CACHE_FRESH_MS - _cacheAgeMs);
       console.log('[init] Cache is ' + Math.round(_cacheAgeMs/1000) + 's old — deferring LLM fetch by ' + Math.round(delayMs/1000) + 's');
       setStatus('CACHED','#94a3b8');
       refreshTimer = setTimeout(function(){ runFetch(false); }, delayMs);
     } else {
+      // First load OR stale/no cache — fetch immediately
       setTimeout(function(){ runFetch(false); }, 1200);
     }
   });
@@ -3297,9 +3303,7 @@ function _startWireScroll(){
 }
 
 function loadWire(){
-  var base = (window.location.protocol==='http:')
-    ? window.location.origin
-    : 'http://localhost:5055';
+  var base = window.location.origin;
   fetch(base + '/api/wire')
     .then(function(r){ return r.json(); })
     .then(function(data){
@@ -3350,8 +3354,7 @@ setInterval(loadWire, 10 * 60 * 1000);        // re-fetch every 10 min
 
 // ── Phase 3B: Candidate news monitor (Google News per AC) ─────────────────────
 function loadFiguresNews(){
-  var base = (window.location.protocol==='http:')
-    ? window.location.origin : 'http://localhost:5055';
+  var base = window.location.origin;
   fetch(base + '/api/figures-news')
     .then(function(r){ return r.json(); })
     .then(function(data){
