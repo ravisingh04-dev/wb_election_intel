@@ -1516,6 +1516,11 @@ def inject_news_into_payload(payload_dict):
     all_panels = (bankura_panel + surrounds_panel + statewide_panel +
                   parties_panel + alerts_panel + official_panel + bangla_panel)
 
+    # Signals = WB-relevant, geo-filtered articles actually used — not raw feed count.
+    # Using the raw fetch count (200+) with when="4d" gives misleading "212 signals" display.
+    count_wb = (len(bankura_raw) + len(surrounds_raw2) + len(statewide_raw) +
+                len(alerts_raw) + len(parties_raw) + len(official_raw) + len(bangla_raw))
+
     # ── Violence / MCC counting: WB-only items, tighter keyword list ─────────
     # 'clash', 'arrested', 'detained' removed from violence keywords —
     # they are too broad and inflate counts when national news leaks through.
@@ -1541,11 +1546,10 @@ def inject_news_into_payload(payload_dict):
                 n += 1
         return n
 
-    # Violence and MCC counts use ONLY geo-filtered items.
-    # alerts_raw and parties_raw are now WB-filtered (Delhi/national items removed).
-    wb_raw = (panel_items.get("bankura",[]) + panel_items.get("surrounds",[]) +
-              statewide_raw + alerts_raw + parties_raw +
-              panel_items.get("official",[]) + panel_items.get("bangla",[]))
+    # Violence and MCC counts use ONLY geo-filtered items — use *_raw filtered lists,
+    # not the raw panel_items which include pre-filter articles (inflates counts with when="4d").
+    wb_raw = (bankura_raw + surrounds_raw2 + statewide_raw + alerts_raw +
+              parties_raw + official_raw + bangla_raw)
 
     violence_count = kw_count(wb_raw, violence_keywords)
     mcc_count      = kw_count(wb_raw, mcc_keywords)
@@ -1553,7 +1557,7 @@ def inject_news_into_payload(payload_dict):
     threat_level   = _threat_level(violence_count, mcc_count, high_items)
     topic_counts   = _topic_counts(panel_items)
 
-    print(f"  Signals: {count} | Violence hits: {violence_count} | MCC hits: {mcc_count} | Threat: {threat_level}")
+    print(f"  Signals (WB-filtered): {count_wb} (raw fetched: {count}) | Violence hits: {violence_count} | MCC hits: {mcc_count} | Threat: {threat_level}")
 
     # Build Python feed arrays — LLM never touches these
     BANGLA_MAX = 6   # items sent to LLM for translation — must match panel_brief max_items
@@ -1569,7 +1573,7 @@ def inject_news_into_payload(payload_dict):
 
     pre_built = {
         "metrics": {
-            "totalSignals": count, "highAlerts": high_items,
+            "totalSignals": count_wb, "highAlerts": high_items,
             "violenceReports": violence_count, "threatLevel": threat_level,
         },
         "bankura":   build_feed_array(bankura_panel),
