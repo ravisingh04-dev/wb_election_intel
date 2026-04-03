@@ -2899,6 +2899,43 @@ class Handler(BaseHTTPRequestHandler):
                     print(f"  [cycles] DB error: {e}")
             self._reply(200, json.dumps({"cycles": rows}).encode())
 
+        elif path == "/api/trend":
+            # GET /api/trend?limit=N — lightweight trend points for the chart
+            # Returns {iso, ts, threatLevel, totalSignals, highAlerts, violenceReports}
+            # oldest-first so the chart renders left→right correctly
+            limit = 200
+            try:
+                qs = parse_qs(self.path.split("?",1)[1]) if "?" in self.path else {}
+                limit = int(qs.get("limit",["200"])[0])
+            except Exception:
+                pass
+            points = []
+            if FEATURE_SQLITE:
+                try:
+                    with _db_lock:
+                        c = _db_conn()
+                        rows = c.execute(
+                            "SELECT fetched_at, full_json FROM cycles ORDER BY id DESC LIMIT ?",
+                            (limit,)
+                        ).fetchall()
+                        c.close()
+                    for row in reversed(rows):   # oldest first
+                        try:
+                            m = json.loads(row["full_json"] or "{}").get("metrics", {})
+                            points.append({
+                                "iso":             row["fetched_at"],
+                                "ts":              row["fetched_at"],
+                                "threatLevel":     (m.get("threatLevel") or "LOW").upper(),
+                                "totalSignals":    m.get("totalSignals")    or 0,
+                                "highAlerts":      m.get("highAlerts")      or 0,
+                                "violenceReports": m.get("violenceReports") or 0,
+                            })
+                        except Exception:
+                            pass
+                except Exception as e:
+                    print(f"  [trend] DB error: {e}")
+            self._reply(200, json.dumps({"points": points}).encode())
+
         elif path == "/api/digest/redigest":
             # POST-like GET: /api/digest/redigest?id=N  — re-queue a failed/done article
             if FEATURE_SQLITE and "?" in self.path:

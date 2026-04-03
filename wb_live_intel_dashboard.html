@@ -565,8 +565,11 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
           <div style="font-size:9px;color:var(--text3);margin-top:1px">Telegram channel</div>
         </div>
       </div>
+      <!-- DEV ONLY: Send Telegram Updates button -->
+      <button class="ctrl-btn" onclick="sendBriefingNow()" style="margin-top:7px">
+        <span class="btn-icon">📡</span> Send Telegram Updates
+      </button>
       <div id="briefingConfigStatus" style="font-size:10px;color:var(--green2);min-height:14px;margin-top:3px"></div>
-
     </div>
 
     <!-- ARTICLE DIGEST -->
@@ -1748,9 +1751,25 @@ function _placeTrendDot(){
   dot.style.display = 'block';
 }
 
-/* On load: render sparkline if previous cycles are already stored */
+/* On load: seed trend from DB then render — works for new visitors on any browser/domain */
 document.addEventListener('DOMContentLoaded', function(){
-  if(FEATURE_SENTIMENT_TREND) renderTrendChart();
+  if(!FEATURE_SENTIMENT_TREND) return;
+  fetch(window.location.origin + '/api/trend?limit=200')
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      var pts = data.points || [];
+      if(pts.length){
+        // Merge DB points with any localStorage points newer than the latest DB point
+        var dbLatestIso = pts[pts.length - 1].iso || '';
+        var localNewer  = _loadTrend().filter(function(p){ return p.iso && p.iso > dbLatestIso; });
+        _saveTrend(pts.concat(localNewer));
+      }
+      renderTrendChart();
+    })
+    .catch(function(){
+      // Proxy unreachable — fall back to whatever is in localStorage
+      renderTrendChart();
+    });
 });
 
 
