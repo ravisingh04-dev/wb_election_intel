@@ -1551,8 +1551,20 @@ def inject_news_into_payload(payload_dict):
     wb_raw = (bankura_raw + surrounds_raw2 + statewide_raw + alerts_raw +
               parties_raw + official_raw + bangla_raw)
 
-    violence_count = kw_count(wb_raw, violence_keywords)
-    mcc_count      = kw_count(wb_raw, mcc_keywords)
+    # Deduplicate wb_raw by title fingerprint before counting violence/MCC.
+    # The same incident (e.g. "Malda violence") is reported by many sources —
+    # without dedup, 10 articles about one incident = 10 violence hits = false CRITICAL.
+    # Fingerprint: first 40 alphanumeric chars of lowercased title.
+    _seen_fps = set()
+    wb_raw_dedup = []
+    for _it in wb_raw:
+        _fp = re.sub(r"\W+", "", (_it.get("title","") + _it.get("summary_hint","")).lower())[:40]
+        if _fp not in _seen_fps:
+            _seen_fps.add(_fp)
+            wb_raw_dedup.append(_it)
+
+    violence_count = kw_count(wb_raw_dedup, violence_keywords)
+    mcc_count      = kw_count(wb_raw_dedup, mcc_keywords)
     high_items     = sum(1 for it in all_panels if it["severity"] == "high")
     threat_level   = _threat_level(violence_count, mcc_count, high_items)
     topic_counts   = _topic_counts(panel_items)
