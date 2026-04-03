@@ -653,7 +653,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
     <span class="status-label" id="statusLabel">STANDBY</span>
     <div class="sep"></div>
     <div class="mode-badge mode-normal" id="modeBadge" onclick="toggleMode()">NORMAL MODE</div>
-    <button class="theme-toggle" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle dark/light mode">☀️ Light</button>
+    <button class="theme-toggle" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle dark/light mode">Light</button>
     <div class="clock-display" id="clock"></div>
     <button class="mob-hamburger" onclick="toggleSidebar()" title="Menu" aria-label="Open menu">☰</button>
   </div>
@@ -665,7 +665,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 <div id="disclaimerModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;align-items:center;justify-content:center">
   <div style="background:var(--bg2);border:1px solid var(--amber);border-radius:10px;max-width:560px;width:90%;padding:28px 28px 22px;position:relative;box-shadow:0 8px 40px rgba(0,0,0,.5)">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
-      <span style="font-size:20px">⚠️</span>
+      
       <div style="font-size:14px;font-weight:800;color:var(--amber);letter-spacing:.04em">DISCLAIMER</div>
     </div>
 
@@ -699,7 +699,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
     <!-- Disclaimer shortcut inside sidebar — only visible on mobile via CSS -->
     <button id="disclaimerSidebarBtn" class="ctrl-btn" onclick="openDisclaimer()" style="margin-bottom:2px">
-      <span class="btn-icon">⚠️</span> Disclaimer
+      <span class="btn-icon"></span> Disclaimer
     </button>
 
     <div class="sidebar-section">
@@ -708,24 +708,24 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
         <span class="btn-icon">↻</span> <span id="fetchNowLabel">Refresh Data</span>
       </button>
       <button class="ctrl-btn danger" onclick="toggleMode()" id="modeToggleBtn" style="display:none">
-        <span class="btn-icon">🚨</span> Switch to Election Day Mode
+        <span class="btn-icon"></span> Switch to Election Day Mode
       </button>
     </div>
 
     <div class="sidebar-section">
       <div class="sid-label">Memory &amp; timeline</div>
       <button class="ctrl-btn" onclick="openTimeline()">
-        <span class="btn-icon">📜</span> View election timeline
+        <span class="btn-icon"></span> View election timeline
       </button>
       <button class="ctrl-btn" onclick="openVideoExport()">
-        <span class="btn-icon">🎬</span> Export as video
+        <span class="btn-icon"></span> Export as video
       </button>
       <div class="stat-mini">
         <div class="stat-mini-val" id="memCount" style="color:var(--purple)">0</div>
         <div class="stat-mini-lbl">Cycles stored in memory</div>
       </div>
       <button class="ctrl-btn tl-danger" style="font-size:11px;padding:6px 10px" onclick="clearMemory()">
-        <span class="btn-icon">🗑</span> Clear stored memory
+        <span class="btn-icon"></span> Clear stored memory
       </button>
     </div>
 
@@ -786,7 +786,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
     <!-- TURNOUT MANUAL ENTRY (shown in election day mode) -->
     <div class="sidebar-section" id="turnoutManualSection" style="display:none">
-      <div class="sid-label">🗳️ Manual Turnout Entry</div>
+      <div class="sid-label">Manual Turnout Entry</div>
       <div style="font-size:10px;color:var(--text3);margin-bottom:6px">Enter official turnout % heard from polling officials.</div>
       <select id="turnoutDistrict" style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:5px 6px;font-size:11px;margin-bottom:5px">
         <option value="Bankura">Bankura</option>
@@ -812,7 +812,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
     <div class="sidebar-section" id="briefingSection">
       <div class="sid-label">Telegram</div>
       <div style="display:flex;align-items:center;gap:7px;padding:7px 9px;background:var(--bg3);border:1px solid var(--border);border-radius:6px">
-        <span style="font-size:15px">📢</span>
+        
         <div>
           <div style="font-size:11px;font-weight:600;color:var(--text)">WB Elections Summary</div>
           <div style="font-size:9px;color:var(--text3);margin-top:1px">Telegram channel</div>
@@ -824,7 +824,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
     <div class="sidebar-section">
       <div class="sid-label">Article Digest</div>
       <button class="ctrl-btn" onclick="openDigest()">
-        <span class="btn-icon">📚</span> Night Digest
+        <span class="btn-icon"></span> Night Digest
         <span class="digest-badge" id="digestUnreadBadge">0</span>
       </button>
       <div class="stat-mini">
@@ -854,7 +854,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
     <!-- MOBILE: unified priority feed (shown on mobile only, replaces feeds-grid) -->
     <div id="mobPriorityFeed">
       <div class="mpf-header">
-        <span>🚨</span>
+        
         <span style="flex:1">Priority Feed</span>
         <span id="mobFeedCount" style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)"></span>
       </div>
@@ -893,7 +893,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
     <!-- TURNOUT ROW (Phase 3C — hidden until election day mode) -->
     <div id="turnoutSection" style="display:none">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-        <span style="font-size:13px;font-weight:600;color:var(--text)">🗳️ Voter Turnout — WB Phase 1</span>
+        <span style="font-size:13px;font-weight:600;color:var(--text)">Voter Turnout — WB Phase 1</span>
         <span id="turnoutLiveTag" style="font-size:9px;font-weight:700;letter-spacing:.07em;background:#dc2626;color:#fff;border-radius:4px;padding:2px 7px">LIVE</span>
         <span id="turnoutUpdatedAt" style="font-size:10px;color:var(--text3);font-family:'JetBrains Mono',monospace;margin-left:4px"></span>
         <button onclick="loadTurnout()" style="margin-left:auto;background:var(--bg3);border:1px solid var(--border);color:var(--text3);border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer" title="Refresh turnout data">↻ Refresh</button>
@@ -912,7 +912,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
     <!-- MAP PANEL (Phase 4) -->
     <div class="map-panel" id="mapPanel" style="display:none">
       <div class="map-panel-header" onclick="toggleMapPanel()">
-        <span style="font-size:14px">🗺️</span>
+        
         <span class="map-panel-title">Bankura District — Assembly Constituency Map</span>
         <span class="map-panel-meta" id="mapModeBadge">THREAT MODE</span>
         <span class="map-panel-meta" id="mapLastUpdate" style="margin-left:8px"></span>
@@ -929,14 +929,14 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
       <!-- LEFT: Bankura district intel -->
       <div class="analysis-panel" id="analysisBankura">
         <div class="analysis-header">
-          <span style="font-size:14px">📍</span>
+          
           <span style="font-size:13px;font-weight:600;flex:1">Bankura Intel</span>
           <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)" id="analysisMeta">AI-powered · auto-updated</span>
         </div>
         <div class="refresh-progress"><div class="refresh-bar" id="progressBar" style="width:0%"></div></div>
         <div class="analysis-body" id="analysisBankuraBody">
           <div class="empty-state">
-            <span class="empty-icon">📡</span>
+            
             Press <strong>Fetch &amp; Analyse Now</strong> to run the first intelligence cycle.<br><br>
             Auto-refreshes every <strong>30 min</strong> (15 min on election day).
           </div>
@@ -951,13 +951,13 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
       <!-- CENTRE: Statewide WB intel -->
       <div class="analysis-panel" id="analysisStatewide">
         <div class="analysis-header">
-          <span style="font-size:14px">🗺️</span>
+          
           <span style="font-size:13px;font-weight:600;flex:1">Statewide Intel</span>
           <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)">WB Phase 1 context</span>
         </div>
         <div class="analysis-body" id="analysisStatewideBody">
           <div class="empty-state">
-            <span class="empty-icon">🗺️</span>
+            
             Awaiting first fetch cycle.
           </div>
         </div>
@@ -967,7 +967,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
       <!-- COL 3: ANI + PTI Wire Tracker -->
         <div class="wire-panel" id="wirePanel">
           <div class="wire-header">
-            <span style="font-size:12px">📰</span>
+            
             <span style="font-size:12px;font-weight:600;flex:1">Wire</span>
             <span style="font-size:9px;font-family:'JetBrains Mono',monospace;color:var(--text3);margin-right:6px" id="wireMeta">ANI · PTI</span>
             <button onclick="loadWire()" title="Refresh wire feed"
@@ -988,7 +988,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
       <div class="figure-monitor" id="figureMonitorPanel">
         <div class="figure-monitor-header">
-          <span style="font-size:14px">🕵️</span>
+          
           <span style="font-size:13px;font-weight:600;flex:1">Political Figures Monitor — Bankura</span>
           <span id="figNewBadge" style="display:none"></span>
           <button id="figHideTop" onclick="toggleHiddenFigures()" style="display:none;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3);background:none;border:1px solid var(--border);border-radius:6px;padding:2px 8px;cursor:pointer;white-space:nowrap">▴ hide</button>
@@ -1001,7 +1001,6 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
       <div class="trend-panel" id="trendPanel" style="display:none">
         <div class="trend-header">
-          <span>📈</span>
           <span>Threat &amp; Signal Trend</span>
           <span class="trend-meta" id="trendMeta">0 cycles stored</span>
         </div>
@@ -1023,7 +1022,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
     <div class="feeds-grid">
       <div class="feed-panel" id="feedBankura">
         <div class="feed-header">
-          <span class="feed-icon">📍</span>
+          
           <span class="feed-title">Bankura &amp; district feeds</span>
           <span class="feed-badge fb-local">LOCAL</span>
         </div>
@@ -1032,7 +1031,6 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
       <div class="feed-panel" id="feedSurrounds">
         <div class="feed-header">
-          <span class="feed-icon">🗺</span>
           <span class="feed-title">Surrounding districts</span>
           <span class="feed-badge fb-local">REGIONAL</span>
         </div>
@@ -1041,7 +1039,6 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
       <div class="feed-panel" id="feedAlerts">
         <div class="feed-header">
-          <span class="feed-icon">⚠</span>
           <span class="feed-title">Alerts &amp; violations</span>
           <span class="feed-badge fb-alert">PRIORITY</span>
         </div>
@@ -1050,7 +1047,6 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
       <div class="feed-panel" id="feedMCC">
         <div class="feed-header">
-          <span class="feed-icon">⚖</span>
           <span class="feed-title">MCC, security &amp; official updates</span>
           <span class="feed-badge fb-nat">OFFICIAL</span>
         </div>
@@ -1059,7 +1055,6 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
       <div class="feed-panel" id="feedWB">
         <div class="feed-header">
-          <span class="feed-icon">📺</span>
           <span class="feed-title">West Bengal statewide</span>
           <span class="feed-badge fb-wb">WB</span>
         </div>
@@ -1068,7 +1063,6 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
       <div class="feed-panel" id="feedParties">
         <div class="feed-header">
-          <span class="feed-icon">🏛</span>
           <span class="feed-title">Party statements — BJP · INC · CPI(M) · TMC</span>
           <span class="feed-badge fb-parties">PARTIES</span>
         </div>
@@ -1077,7 +1071,6 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
       <div class="feed-panel full-width" id="feedBangla">
         <div class="feed-header">
-          <span class="feed-icon">📰</span>
           <span class="feed-title">Bengali media — Anandabazar · Eisamay · Zee 24 Ghanta · Bartaman (translated)</span>
           <span class="feed-badge fb-bangla">বাংলা</span>
         </div>
@@ -1091,7 +1084,6 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 <div class="digest-modal-wrap" id="digestModal" onclick="if(event.target===this)closeDigest()">
   <div class="digest-modal">
     <div class="dm-header">
-      <span style="font-size:16px">📚</span>
       <span class="dm-title">Article Digest — MED/HIGH Priority</span>
       <select class="dm-filter" id="dmDaysFilter" onchange="loadDigests()">
         <option value="1">Today</option>
@@ -1104,7 +1096,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
         <option value="high">HIGH only</option>
         <option value="medium">MED only</option>
       </select>
-      <button class="dm-btn" id="dmNightBtn" onclick="toggleNightMode()">🌙 Night brief</button>
+      <button class="dm-btn" id="dmNightBtn" onclick="toggleNightMode()">Night brief</button>
       <button class="dm-btn" onclick="exportDigests()">⬇ Export .txt</button>
       <button class="dm-btn" onclick="markAllRead()">✓ Mark all read</button>
       <button class="dm-close" onclick="closeDigest()">✕</button>
@@ -1117,7 +1109,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 <div id="tlModal" class="tl-modal-overlay" style="display:none" onclick="if(event.target===this)closeTl()">
   <div class="tl-modal">
     <div class="tl-modal-header">
-      <span style="font-size:16px">📜</span>
+      
       <span class="tl-modal-title">Election Intelligence Timeline — Bankura 2026</span>
       <span id="tlEntryCount" style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text2)"></span>
     </div>
@@ -1125,7 +1117,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
     <div class="tl-modal-footer">
       <button class="tl-btn tl-primary" onclick="exportJSON()">⬇ Export JSON</button>
       <button class="tl-btn tl-primary" onclick="exportCSV()">⬇ Export CSV</button>
-      <button class="tl-btn" onclick="openVideoExport()">🎬 Generate video</button>
+      <button class="tl-btn" onclick="openVideoExport()">Generate video</button>
       <button class="tl-btn" onclick="closeTl()" style="margin-left:auto">Close</button>
     </div>
   </div>
@@ -1135,7 +1127,6 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 <div id="briefingModal" class="tl-modal-overlay" style="display:none" onclick="if(event.target===this)closeBriefingHistory()">
   <div class="tl-modal" style="max-width:680px">
     <div class="tl-modal-header">
-      <span style="font-size:16px">📡</span>
       <span class="tl-modal-title">Daily Briefing History</span>
       <span id="briefingHistoryCount" style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text2)"></span>
     </div>
@@ -1152,7 +1143,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 <div id="videoModal" class="tl-modal-overlay" style="display:none" onclick="if(event.target===this)closeVideo()">
   <div class="tl-modal" style="max-width:600px">
     <div class="tl-modal-header">
-      <span style="font-size:16px">🎬</span>
+      
       <span class="tl-modal-title">Video Export — Election Timeline</span>
     </div>
     <div class="tl-modal-body" style="padding:20px">
@@ -1439,11 +1430,11 @@ function toggleMode(){
   var btn   = document.getElementById('modeToggleBtn');
   if(isElectionMode){
     badge.textContent='ELECTION DAY'; badge.className='mode-badge mode-election';
-    btn.innerHTML='🔵 Switch to Normal Mode';
+    btn.innerHTML='Switch to Normal Mode';
     progressDuration=REFRESH_ELECTION;
   } else {
     badge.textContent='NORMAL MODE'; badge.className='mode-badge';
-    btn.innerHTML='🚨 Election Day Mode';
+    btn.innerHTML='Election Day Mode';
     progressDuration=REFRESH_NORMAL;
   }
   scheduleNext();
@@ -1776,16 +1767,16 @@ function _notifBtnUpdate(){
   if(!btn || !badge) return;
   var perm = (typeof Notification !== 'undefined') ? Notification.permission : 'unsupported';
   if(perm === 'unsupported'){
-    btn.innerHTML = '<span class="btn-icon">🔕</span> Not supported'; btn.disabled = true;
+    btn.innerHTML = '<span class="btn-icon"></span> Not supported'; btn.disabled = true;
     badge.textContent = 'N/A'; badge.className = 'notif-status blocked';
   } else if(perm === 'denied'){
-    btn.innerHTML = '<span class="btn-icon">🔕</span> Blocked by browser'; btn.disabled = true;
+    btn.innerHTML = '<span class="btn-icon"></span> Blocked by browser'; btn.disabled = true;
     badge.textContent = 'BLOCKED'; badge.className = 'notif-status blocked';
   } else if(_notifEnabled && perm === 'granted'){
-    btn.innerHTML = '<span class="btn-icon">🔕</span> Disable alerts';
+    btn.innerHTML = '<span class="btn-icon"></span> Disable alerts';
     badge.textContent = 'ON'; badge.className = 'notif-status on';
   } else {
-    btn.innerHTML = '<span class="btn-icon">🔔</span> Enable push alerts';
+    btn.innerHTML = '<span class="btn-icon"></span> Enable push alerts';
     badge.textContent = 'OFF'; badge.className = 'notif-status off';
   }
 }
@@ -1978,9 +1969,18 @@ function renderTrendChart(){
   var alertVals = arr.map(function(p){ return p.highAlerts||0; });
   var violVals  = arr.map(function(p){ return p.violenceReports||0; });
 
+  /* Sparse labels: show only start, mid, and end — everything else blank.
+     This guarantees exactly 2-3 readable dates regardless of how many points. */
+  var sparseLabels = labels.map(function(){ return ''; });
+  var lastIdx = labels.length - 1;
+  var midIdx  = Math.round(lastIdx / 2);
+  sparseLabels[0]       = labels[0];
+  sparseLabels[midIdx]  = labels[midIdx];
+  sparseLabels[lastIdx] = labels[lastIdx];
+
   /* Pad 3 null slots at the end so the line ends before the right edge */
   var TAIL = 3;
-  var pLabels = labels.concat(['','','']);
+  var pLabels = sparseLabels.concat(['','','']);
   var pTl     = tlVals.concat([null,null,null]);
   var pAlert  = alertVals.concat([null,null,null]);
   var pViol   = violVals.concat([null,null,null]);
@@ -2002,9 +2002,8 @@ function renderTrendChart(){
   }
   if(_trendChart){ _trendChart.destroy(); _trendChart = null; }
 
-  var xTickCfg = multiDay
-    ? { autoSkip:true, maxTicksLimit:(isMob ? 4 : 8), font:{size:9}, color:'#64748b', maxRotation:0 }
-    : { maxTicksLimit:(isMob ? 4 : 10), font:{size:9}, color:'#64748b', maxRotation:0 };
+  /* autoSkip:false — labels array is already sparse (only start/mid/end non-empty) */
+  var xTickCfg = { autoSkip:false, font:{size:9}, color:'#64748b', maxRotation:0 };
 
   _trendChart = new Chart(canvas, {
     type: 'line',
@@ -2378,7 +2377,7 @@ function _applyFigureVisibility(){
 
     var hiddenActive = hiddenCards.filter(function(c){ return c._figScore > 0; }).length;
     var labelOpen  = '▴ hide';
-    var labelClose = '👥 ' + hiddenCards.length + ' more candidate' +
+    var labelClose = '+' + hiddenCards.length + ' more candidate' +
                      (hiddenCards.length !== 1 ? 's' : '') +
                      (hiddenActive ? ' (' + hiddenActive + ' active)' : ' — no recent mentions') + ' ▾';
 
@@ -2441,7 +2440,7 @@ function toggleHiddenFigures(){
     ).length;
     label.textContent = _figExpanded
       ? '▴ hide'
-      : '👥 ' + hiddenCount + ' more candidate' + (hiddenCount !== 1 ? 's' : '') +
+      : '+' + hiddenCount + ' more candidate' + (hiddenCount !== 1 ? 's' : '') +
         (hiddenActive ? ' (' + hiddenActive + ' active)' : ' — no recent mentions') + ' ▾';
   }
   // Show/hide the header-level hide button
@@ -2879,10 +2878,10 @@ function _applyBriefingUI(cfg){
   var btn   = document.getElementById('briefingToggleBtn');
   if(_briefingEnabled){
     if(badge){ badge.textContent='ON'; badge.style.background='#22c55e22'; badge.style.color='#16a34a'; }
-    if(btn)  btn.innerHTML='<span class="btn-icon">📡</span> Disable daily briefing';
+    if(btn)  btn.innerHTML='<span class="btn-icon"></span> Disable daily briefing';
   } else {
     if(badge){ badge.textContent='OFF'; badge.style.background='#94a3b822'; badge.style.color='var(--text3)'; }
-    if(btn)  btn.innerHTML='<span class="btn-icon">📡</span> Enable daily briefing';
+    if(btn)  btn.innerHTML='<span class="btn-icon"></span> Enable daily briefing';
   }
   // Telegram fields — token is masked (***) from server; don't overwrite if user has typed one
   var chatIdEl = document.getElementById('briefingTgChatId');
