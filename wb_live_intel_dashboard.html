@@ -424,6 +424,13 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 .fi-link{font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--accent2);text-decoration:none;padding:1px 6px;border-radius:4px;border:1px solid rgba(59,130,246,0.3);transition:all .12s}
 .fi-link:hover{background:rgba(59,130,246,0.1)}
 
+/* ── MOBILE ANALYSIS EXPAND (hidden on desktop) ── */
+.mob-analysis-expand{display:none;width:100%;padding:4px;font-size:11px;
+  font-family:'JetBrains Mono',monospace;color:var(--accent2);cursor:pointer;
+  background:var(--bg3);border:none;border-top:1px solid var(--border);
+  text-align:center;letter-spacing:.03em}
+/* ── DISCLAIMER SIDEBAR BUTTON (hidden on desktop, shown in sidebar on mobile) ── */
+#disclaimerSidebarBtn{display:none}
 /* ── MOBILE HAMBURGER (hidden on desktop) ── */
 .mob-hamburger{display:none;align-items:center;justify-content:center;
   background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);
@@ -435,96 +442,120 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
 /* ── MOBILE RESPONSIVE (≤768px) ── */
 @media(max-width:768px){
-  /* Topbar — two-row on mobile to prevent overflow */
-  .topbar{padding:6px 10px;gap:6px;height:auto;min-height:52px;flex-wrap:wrap;align-content:center}
+  /* ── Topbar: strict single line, no wrapping ── */
+  .topbar{padding:0 10px;gap:6px;height:48px;flex-wrap:nowrap;align-items:center}
   .logo{display:none}
   .topbar>.sep{display:none}
-  .hdr-district{font-size:11.5px}
-  .hdr-sub{font-size:10px}
+  /* Title block: shrinks & truncates, never wraps */
+  .topbar>div:nth-child(3){flex:1;min-width:0;overflow:hidden}
+  .hdr-district{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .hdr-sub{display:none}
+  /* Disclaimer button: hidden from topbar on mobile — accessible via sidebar */
+  #disclaimerBtn{display:none}
+  /* Right controls: stay compact, never wrap */
+  .hdr-right{gap:4px;flex-shrink:0;flex-wrap:nowrap}
   .clock-display{display:none}
   .mode-badge{display:none}
   .next-refresh{display:none}
-  .status-label{font-size:10px;max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .hdr-right{gap:5px;flex-shrink:0}
-  .theme-toggle{padding:3px 7px;font-size:10px;gap:2px}
+  .status-label{display:none}
+  .pulse-dot{width:7px;height:7px}
+  .theme-toggle{padding:3px 6px;font-size:10px;gap:2px}
   .mob-hamburger{display:flex;padding:4px 8px;font-size:16px}
 
-  /* Main layout: single column — content takes full width */
+  /* ── Main layout: full width ── */
   .main{grid-template-columns:1fr}
 
-  /* Sidebar: slide-in drawer overlay */
+  /* ── Sidebar: compact slide-in drawer ── */
   .sidebar{
-    position:fixed;top:52px;left:0;bottom:0;width:68vw;max-width:220px;z-index:300;
+    position:fixed;top:48px;left:0;bottom:0;width:64vw;max-width:210px;z-index:300;
     transform:translateX(-105%);transition:transform .25s cubic-bezier(.4,0,.2,1);
     box-shadow:6px 0 24px rgba(0,0,0,0.18);overflow-y:auto;overflow-x:hidden
   }
   .sidebar.mob-open{transform:translateX(0)}
-  .sidebar-backdrop{display:none;position:fixed;inset:0;top:52px;
+  .sidebar-backdrop{display:none;position:fixed;inset:0;top:48px;
     background:rgba(0,0,0,0.45);z-index:299}
   .sidebar-backdrop.mob-open{display:block}
-
   /* Sidebar close bar */
   .sidebar-close-bar{display:flex;align-items:center;justify-content:space-between;
-    padding:10px 14px 6px;border-bottom:1px solid var(--border);margin-bottom:4px;flex-shrink:0}
-  .sidebar-close-bar span{font-size:11px;font-weight:600;text-transform:uppercase;
+    padding:8px 12px 5px;border-bottom:1px solid var(--border);margin-bottom:4px;flex-shrink:0}
+  .sidebar-close-bar span{font-size:10px;font-weight:600;text-transform:uppercase;
     letter-spacing:.08em;color:var(--text3);font-family:'JetBrains Mono',monospace}
   .sidebar-close-btn{background:none;border:1px solid var(--border2);color:var(--text3);
-    border-radius:5px;padding:3px 9px;font-size:14px;cursor:pointer;line-height:1}
-  .sidebar-close-btn:hover{color:var(--text);border-color:var(--accent)}
+    border-radius:5px;padding:2px 8px;font-size:13px;cursor:pointer;line-height:1}
+  /* Show disclaimer inside sidebar on mobile */
+  #disclaimerSidebarBtn{display:flex !important}
 
-  /* Content fills full width */
-  .content{padding:10px;gap:12px}
+  /* ── Content ── */
+  .content{padding:8px;gap:10px}
 
-  /* Metrics — 2×2 grid */
-  .metrics-row{grid-template-columns:repeat(2,1fr);gap:8px}
-  .metric-val{font-size:20px}
+  /* ── Metrics — 2×2 ── */
+  .metrics-row{grid-template-columns:repeat(2,1fr);gap:7px}
+  .metric-val{font-size:19px}
+  .metric-card{padding:9px 11px}
 
-  /* Feeds — single column */
-  .feeds-grid{grid-template-columns:1fr;gap:10px}
+  /* ── Feed items — tighter ── */
+  .feed-item{padding:7px 10px;font-size:11.5px}
+  .fi-text{line-height:1.4;margin-bottom:2px}
+  .feeds-grid{grid-template-columns:1fr;gap:8px}
 
-  /* Intel grid — already has @media 960/600 rules, force 1-col below 600 */
-  .intel-grid{gap:10px}
+  /* ── Intel grid ── */
+  .intel-grid{gap:8px}
 
-  /* Mid row — stack vertically */
-  .mid-row{flex-direction:column;gap:10px}
-  .wire-panel{height:300px}
+  /* ── Analysis panel — truncate on mobile ── */
+  .analysis-body{max-height:100px;overflow:hidden;position:relative;min-height:unset}
+  .analysis-body.mob-expanded{max-height:none}
+  .analysis-body:not(.mob-expanded)::after{
+    content:'';position:absolute;bottom:0;left:0;right:0;height:36px;
+    background:linear-gradient(transparent,var(--bg2));pointer-events:none}
+  .mob-analysis-expand{display:flex !important}
 
-  /* Turnout — 3 columns then wrap */
-  .turnout-row{grid-template-columns:repeat(3,1fr);gap:6px}
-  .turnout-pct{font-size:18px}
+  /* ── Wire: compact, 3-item visible height, rest ticks ── */
+  .mid-row{flex-direction:column;gap:8px}
+  .wire-panel{height:190px}
+  .wire-item{padding:5px 8px}
+  .wire-item-title{font-size:10.5px}
 
-  /* Charts — single column */
+  /* ── Trend panel: tight fit ── */
+  .trend-chart-wrap{height:75px;padding:6px 10px 2px}
+  .trend-legend{display:none}
+  .trend-header{padding:7px 10px;font-size:12px}
+
+  /* ── Turnout ── */
+  .turnout-row{grid-template-columns:repeat(3,1fr);gap:5px}
+  .turnout-pct{font-size:17px}
+  .turnout-card{padding:7px 9px}
+
+  /* ── Charts ── */
   .charts-row{grid-template-columns:1fr}
 
-  /* District map — 2 columns */
+  /* ── District map ── */
   .district-map{grid-template-columns:1fr 1fr}
 
-  /* Figure monitor — 2 columns min */
-  .figure-monitor-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;padding:10px}
+  /* ── Figure monitor ── */
+  .figure-monitor-grid{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px;padding:8px}
+  .fig-card{padding:8px 10px}
 
-  /* Timeline modal feeds — single column */
+  /* ── Modals ── */
   .tl-feeds{grid-template-columns:1fr}
   .tl-modal{width:96vw;max-height:92vh}
-
-  /* Digest modal */
   .digest-modal{max-height:92vh}
-  .dm-header{padding:10px 14px}
-  .dm-body{padding:10px 14px}
-
-  /* Trend panel */
-  .trend-chart-wrap{height:90px}
-
-  /* Disclaimer modal */
+  .dm-header{padding:9px 12px}
+  .dm-body{padding:9px 12px}
 }
 
 /* ── VERY SMALL SCREENS (≤420px) ── */
 @media(max-width:420px){
+  .topbar{height:44px}
+  .sidebar{top:44px}
+  .sidebar-backdrop{top:44px}
   .metrics-row{grid-template-columns:1fr 1fr}
+  .metric-val{font-size:17px}
   .turnout-row{grid-template-columns:repeat(2,1fr)}
-  .hdr-district{font-size:11px}
   .figure-monitor-grid{grid-template-columns:1fr 1fr}
-  .feeds-grid{gap:8px}
-  .content{padding:8px;gap:10px}
+  .feeds-grid{gap:6px}
+  .content{padding:6px;gap:8px}
+  .wire-panel{height:160px}
+  .trend-chart-wrap{height:65px}
 }
 </style>
 </head>
@@ -588,6 +619,11 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
       <span>Menu</span>
       <button class="sidebar-close-btn" onclick="closeSidebar()">✕</button>
     </div>
+
+    <!-- Disclaimer shortcut inside sidebar — only visible on mobile via CSS -->
+    <button id="disclaimerSidebarBtn" class="ctrl-btn" onclick="openDisclaimer()" style="margin-bottom:2px">
+      <span class="btn-icon">⚠️</span> Disclaimer
+    </button>
 
     <div class="sidebar-section">
       <div class="sid-label">Controls</div>
@@ -811,6 +847,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
             Auto-refreshes every <strong>30 min</strong> (15 min on election day).
           </div>
         </div>
+        <button class="mob-analysis-expand" onclick="toggleAnalysisExpand('analysisBankuraBody',this)">▾ Show more</button>
         <div class="analysis-footer">
           <span id="analysisTimestamp">Not yet run</span>
           <span id="analysisModel">local-llm</span>
@@ -830,6 +867,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
             Awaiting first fetch cycle.
           </div>
         </div>
+        <button class="mob-analysis-expand" onclick="toggleAnalysisExpand('analysisStatewideBody',this)">▾ Show more</button>
       </div>
 
       <!-- COL 3: ANI + PTI Wire Tracker -->
@@ -3196,6 +3234,14 @@ function toggleTheme(){
   var next   = !isDark;
   _applyTheme(next);
   try{ localStorage.setItem(THEME_KEY, next ? 'dark' : 'light'); }catch(e){}
+}
+
+// ── MOBILE ANALYSIS EXPAND ───────────────────────────────────────────────────
+function toggleAnalysisExpand(bodyId, btn){
+  var body = document.getElementById(bodyId);
+  if(!body) return;
+  var expanded = body.classList.toggle('mob-expanded');
+  btn.textContent = expanded ? '▴ Show less' : '▾ Show more';
 }
 
 // ── MOBILE SIDEBAR ────────────────────────────────────────────────────────────
