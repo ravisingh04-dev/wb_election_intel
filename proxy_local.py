@@ -43,6 +43,8 @@ _wire_cache = {"ts": 0.0, "items": []}   # ANI+PTI wire feed cache (10-min TTL)
 DB_PATH              = SCRIPT_DIR / "bankura_intel.db"
 TELEGRAM_CONFIG_FILE = SCRIPT_DIR / "telegram_config.json"
 _db_lock = threading.Lock()   # single write-lock for all DB operations
+_fetch_lock = threading.Lock()  # prevent concurrent LLM fetches (central + manual)
+_CENTRAL_FETCH_INTERVAL = 15 * 60  # seconds — one fetch every 15 min, all clients read from DB
 
 # ─── SQLite helpers ───────────────────────────────────────────────────────────
 
@@ -561,14 +563,14 @@ POLITICAL_FIGURES = [
 #   Items older than their panel threshold are silently dropped.
 
 MAX_AGE_HOURS = {
-    "bankura":   96,   # 4 days for local Bankura items
-    "surrounds": 48,   # 48h for surrounding districts
-    "statewide": 48,   # 48h for WB statewide
-    "alerts":    48,   # 48h for alerts — pre-election coverage
-    "official":  48,   # 48h for official updates
-    "social":    48,   # 48h for social media signals
-    "parties":   48,   # 48h for party statements/press releases
-    "bangla":    48,   # 48h for Bengali-language sources
+    "bankura":   96,   # 4 days — low-volume local beat (when:4d in gnews)
+    "surrounds": 52,   # ~2 days + buffer (when:2d in gnews)
+    "statewide": 52,   # ~2 days + buffer (when:2d in gnews)
+    "alerts":    100,  # ~4 days + buffer (when:4d in gnews — real incidents are sparse)
+    "official":  52,   # ~2 days + buffer
+    "social":    52,
+    "parties":   52,
+    "bangla":    52,
 }
 
 # NOTE: Nitter (open-source Twitter frontend with RSS) was removed.
@@ -577,8 +579,10 @@ MAX_AGE_HOURS = {
 # which aggregates viral tweets and news that cites Twitter sources reliably.
 
 # Google News RSS — reliable, no auth, good coverage
-def gnews(query):
-    return f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}&hl=en-IN&gl=IN&ceid=IN:en"
+def gnews(query, when="2d"):
+    """Google News RSS. when='2d' restricts to last 2 days — keeps surrounds/alerts fresh."""
+    q = urllib.parse.quote(query + (f" when:{when}" if when else ""))
+    return f"https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
 
 def gnews_bn(query):
     """Google News RSS — Bengali language edition (returns Bengali-language articles)."""
@@ -637,8 +641,8 @@ _FIGURES_NEWS_CACHE = {"ts": 0.0, "data": {}}  # {candidate_name: [articles]}
 #      Using keyword query instead — same approach as PTI
 # IANS: dropped — Google News returns stub "IANS - IANS" titles only (unusable)
 WIRE_FEEDS = [
-    ("ANI", gnews("ANI \"West Bengal\" election 2026")),
-    ("PTI", gnews("PTI \"West Bengal\" election 2026")),
+    ("ANI", gnews("ANI \"West Bengal\" election 2026", when="2d")),
+    ("PTI", gnews("PTI \"West Bengal\" election 2026", when="2d")),
 ]
 # Minimum keywords one of which must appear in title for wire item to pass WB filter
 _WIRE_WB_KW = [
@@ -648,71 +652,75 @@ _WIRE_WB_KW = [
 ]
 
 RSS_FEEDS = [
-    # ── BANKURA LOCAL (4 days) ────────────────────────────────────────────
+    # ── BANKURA LOCAL (4 days — low-volume beat needs wider window) ──────────
     ("bankura", "Google: Bankura election 2026",
-     gnews("Bankura election 2026")),
+     gnews("Bankura election 2026", when="4d")),
     ("bankura", "Google: Bankura candidate campaign",
-     gnews("Bankura candidate campaign rally 2026")),
+     gnews("Bankura candidate campaign rally 2026", when="4d")),
     ("bankura", "Google: Bishnupur election",
-     gnews("Bishnupur election 2026")),
+     gnews("Bishnupur election 2026", when="4d")),
     ("bankura", "Google: Bishnupur Barjora Sonamukhi",
-     gnews("Bishnupur OR Barjora OR Sonamukhi election 2026")),
+     gnews("Bishnupur OR Barjora OR Sonamukhi election 2026", when="4d")),
     ("bankura", "Google: Saltora Chhatna Taldangra Onda",
-     gnews("Saltora OR Chhatna OR Taldangra OR Onda election 2026")),
+     gnews("Saltora OR Chhatna OR Taldangra OR Onda election 2026", when="4d")),
     ("bankura", "Google: Bankura violence MCC",
-     gnews("Bankura election violence OR MCC violation 2026")),
+     gnews("Bankura election violence OR MCC violation 2026", when="4d")),
     ("bankura", "Google: Kotulpur Indas Raipur Ranibandh",
-     gnews("Kotulpur OR Indas OR Raipur OR Ranibandh election 2026")),
+     gnews("Kotulpur OR Indas OR Raipur OR Ranibandh election 2026", when="4d")),
     ("bankura", "Google: Bankura polling booth security",
-     gnews("Bankura polling booth security paramilitary 2026")),
+     gnews("Bankura polling booth security paramilitary 2026", when="4d")),
 
-    # ── SURROUNDING DISTRICTS (36h) ────────────────────────────────────────
+    # ── SURROUNDING DISTRICTS (48h) ───────────────────────────────────────
     ("surrounds", "Google: Purulia election",
-     gnews("Purulia election 2026")),
+     gnews("Purulia election 2026", when="2d")),
     ("surrounds", "Google: Jhargram election",
-     gnews("Jhargram election 2026")),
+     gnews("Jhargram election 2026", when="2d")),
     ("surrounds", "Google: Birbhum election",
-     gnews("Birbhum election 2026")),
+     gnews("Birbhum election 2026", when="2d")),
     ("surrounds", "Google: Paschim Bardhaman election",
-     gnews("Paschim Bardhaman OR Asansol OR Durgapur election 2026")),
+     gnews("Paschim Bardhaman OR Asansol OR Durgapur election 2026", when="2d")),
     ("surrounds", "Google: Paschim Medinipur election",
-     gnews("Paschim Medinipur OR Kharagpur election 2026")),
+     gnews("Paschim Medinipur OR Kharagpur election 2026", when="2d")),
+    ("surrounds", "Google: Purulia Jhargram violence MCC",
+     gnews("Purulia OR Jhargram OR Birbhum election violence arrest MCC 2026", when="2d")),
 
-    # ── WEST BENGAL STATEWIDE — election-specific only ─────────────────────
+    # ── WEST BENGAL STATEWIDE ─────────────────────────────────────────────
     ("statewide", "Google: WB election Phase 1 violence booth",
-     gnews("West Bengal election Phase 1 2026 violence OR booth OR MCC OR candidate")),
+     gnews("West Bengal election Phase 1 2026 violence OR booth OR MCC OR candidate", when="2d")),
     ("statewide", "Google: TMC BJP clash Bengal election",
-     gnews("TMC BJP West Bengal election clash violence arrest 2026")),
+     gnews("TMC BJP West Bengal election clash violence arrest 2026", when="2d")),
     ("statewide", "ANI: WB election Phase 1",
-     gnews("West Bengal election Phase 1 2026 site:aninews.in")),
+     gnews("West Bengal election Phase 1 2026 site:aninews.in", when="2d")),
     ("statewide", "Telegraph India: WB election",
-     gnews("West Bengal election 2026 site:telegraphindia.com")),
+     gnews("West Bengal election 2026 site:telegraphindia.com", when="2d")),
     ("statewide", "NDTV: WB election Phase 1",
-     gnews("West Bengal assembly election Phase 1 2026 site:ndtv.com")),
+     gnews("West Bengal assembly election Phase 1 2026 site:ndtv.com", when="2d")),
     ("statewide", "Google: WB booth capture rigging 2026",
-     gnews("West Bengal booth capture rigging poll violence 2026")),
+     gnews("West Bengal booth capture rigging poll violence 2026", when="2d")),
     ("statewide", "Google: WB election candidate campaign 2026",
-     gnews("West Bengal election candidate campaign Phase 1 Bankura Purulia 2026")),
+     gnews("West Bengal election candidate campaign Phase 1 Bankura Purulia 2026", when="2d")),
     ("statewide", "Google: WB election CRPF deployment security",
-     gnews("West Bengal election CRPF deployment security Phase 1 2026")),
+     gnews("West Bengal election CRPF deployment security Phase 1 2026", when="2d")),
     ("statewide", "Google: WB election ECI order Phase 1",
-     gnews("West Bengal election 2026 ECI order announcement Phase 1 Bankura")),
+     gnews("West Bengal election 2026 ECI order announcement Phase 1 Bankura", when="2d")),
 
-    # ── ALERTS (24h only) ──────────────────────────────────────────────────
+    # ── ALERTS (4d — violence/MCC/arms coverage; real incidents are sparse) ──
     ("alerts", "Google: WB election violence booth capture",
-     gnews("West Bengal election violence booth capture 2026")),
+     gnews("West Bengal election violence booth capture 2026", when="4d")),
     ("alerts", "Google: West Bengal MCC violation",
-     gnews("West Bengal election MCC violation 2026")),
+     gnews("West Bengal election MCC violation 2026", when="4d")),
     ("alerts", "Google: EVM VVPAT complaint Bengal",
-     gnews("EVM VVPAT complaint West Bengal 2026")),
+     gnews("EVM VVPAT complaint West Bengal 2026", when="4d")),
     ("alerts", "Google: WB election arrest seized",
-     gnews("West Bengal election arrest seized cash arms 2026")),
+     gnews("West Bengal election arrest seized cash arms 2026", when="4d")),
     ("alerts", "Google: Bengal bomb crude bomb election",
-     gnews("Bengal bomb crude election 2026")),
+     gnews("Bengal bomb crude election 2026", when="4d")),
+    ("alerts", "Google: Malda Murshidabad violence Bengal",
+     gnews("Malda OR Murshidabad election violence arrest 2026", when="4d")),
 
-    # ── OFFICIAL (24h only) ────────────────────────────────────────────────
+    # ── OFFICIAL (48h) ────────────────────────────────────────────────────
     ("official", "Google: ECI West Bengal order",
-     gnews("Election Commission West Bengal 2026 order directive")),
+     gnews("Election Commission West Bengal 2026 order directive", when="2d")),
     ("official", "Google: CRPF paramilitary Bengal",
      gnews("CRPF paramilitary West Bengal election deployment 2026")),
     ("official", "Google: CEO West Bengal",
@@ -1444,8 +1452,18 @@ def inject_news_into_payload(payload_dict):
         "mamata", "trinamool", "tmc", "wb election", "wb 2026",
         "ceo west bengal", "bengal election",
     ]
+    # Hard blocklist — international/national topics that can never be WB election news
+    _INTL_BLOCK = [
+        "israel", "palestine", "gaza", "lebanon", "ukraine", "russia", "nato",
+        "pakistan", "china", "myanmar", "bangladesh election", "us election",
+        "donald trump", "white house", "congress us", "senate", "pentagon",
+        "stock market", "sensex", "nifty", "rupee", "rbi rate", "gdp",
+        "ipl ", "cricket", "bollywood", "oscar", "grammy",
+    ]
     def _is_wb_relevant(item):
         text = (item.get("title", "") + " " + item.get("desc", "")).lower()
+        if any(bl in text for bl in _INTL_BLOCK):
+            return False
         return any(kw in text for kw in _WB_GEO_KW)
 
     # Statewide: election-relevant AND WB-geographic
@@ -1465,24 +1483,35 @@ def inject_news_into_payload(payload_dict):
         it for it in panel_items.get("parties", [])
         if _is_wb_relevant(it)
     ]
-    # Bankura, surrounds, official, bangla: sourced from WB-specific feeds — no filter needed.
+    # Bankura/surrounds/official: WB-specific queries but Google News still occasionally
+    # returns unrelated international articles — apply geo-filter to all panels.
+    bankura_raw  = [it for it in panel_items.get("bankura",  []) if _is_wb_relevant(it)]
+    surrounds_raw2 = [it for it in panel_items.get("surrounds",[]) if _is_wb_relevant(it)]
+    official_raw = [it for it in panel_items.get("official", []) if _is_wb_relevant(it)]
+    # Bangla sources: Bengali-language feeds — keep as-is (WB-only sources)
+    bangla_raw   = panel_items.get("bangla", [])
+
+    bk_dropped = len(panel_items.get("bankura",  [])) - len(bankura_raw)
+    sr_dropped = len(panel_items.get("surrounds",[])) - len(surrounds_raw2)
+    of_dropped = len(panel_items.get("official", [])) - len(official_raw)
 
     # Log how much was dropped across all filtered panels
     sw_dropped = len(panel_items.get("statewide", [])) - len(statewide_raw)
     al_dropped = len(panel_items.get("alerts",    [])) - len(alerts_raw)
     pa_dropped = len(panel_items.get("parties",   [])) - len(parties_raw)
-    total_dropped = sw_dropped + al_dropped + pa_dropped
+    total_dropped = sw_dropped + al_dropped + pa_dropped + bk_dropped + sr_dropped + of_dropped
     if total_dropped:
         print(f"  Geo-filter: dropped {total_dropped} non-WB article(s) "
-              f"[statewide:{sw_dropped} alerts:{al_dropped} parties:{pa_dropped}]")
+              f"[bankura:{bk_dropped} surrounds:{sr_dropped} statewide:{sw_dropped} "
+              f"alerts:{al_dropped} official:{of_dropped} parties:{pa_dropped}]")
 
-    bankura_panel   = _build_panel_json(panel_items.get("bankura",   []))
-    surrounds_panel = _build_panel_json(panel_items.get("surrounds", []))
+    bankura_panel   = _build_panel_json(bankura_raw)
+    surrounds_panel = _build_panel_json(surrounds_raw2)
     statewide_panel = _build_panel_json(statewide_raw)
     parties_panel   = _build_panel_json(parties_raw)
     alerts_panel    = _build_panel_json(alerts_raw)
-    official_panel  = _build_panel_json(panel_items.get("official",  []))
-    bangla_panel    = _build_panel_json(panel_items.get("bangla",    []))
+    official_panel  = _build_panel_json(official_raw)
+    bangla_panel    = _build_panel_json(bangla_raw)
 
     all_panels = (bankura_panel + surrounds_panel + statewide_panel +
                   parties_panel + alerts_panel + official_panel + bangla_panel)
@@ -2300,6 +2329,57 @@ def _save_cycle(result):
         print(f"  [cycle] Save error: {e}")
 
 
+def _evict_other_models():
+    """Unload any Ollama model that isn't ours — prevents VRAM swap delay on fetch."""
+    try:
+        with urllib.request.urlopen("http://localhost:11434/api/ps", timeout=4) as r:
+            running = json.loads(r.read()).get("models", [])
+        for m in running:
+            name = m.get("name", "")
+            if not name.startswith(Handler.model.split(":")[0]):
+                req = urllib.request.Request(
+                    "http://localhost:11434/api/generate",
+                    data=json.dumps({"model": name, "prompt": "", "keep_alive": "0s"}).encode(),
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                urllib.request.urlopen(req, timeout=10).read()
+                print(f"  [evict] Unloaded {name} from VRAM")
+    except Exception as e:
+        print(f"  [evict] Warning: {e}")
+
+
+def _do_fetch_cycle():
+    """
+    Core RSS → LLM → parse → DB pipeline.
+    Called by the 15-min central scheduler and by POST /api/fetch/trigger (localhost/dev).
+    Returns the parsed result dict.  Raises on error — caller decides how to handle.
+    """
+    _evict_other_models()   # clear VRAM of any competing model before loading qwen2.5:7b
+    payload = {"model": Handler.model, "max_tokens": 1400, "stream": False}
+    payload = inject_news_into_payload(payload)
+    pre_built = payload.pop("_pre_built", None)
+    b = Handler.backend
+    if b == "ollama":
+        result = call_ollama(payload, Handler.backend_url, Handler.model)
+    elif b in ("groq", "openai", "openai-compat"):
+        result = call_openai_compat(payload, Handler.backend_url, Handler.api_key, Handler.model)
+    elif b == "gemini":
+        result = call_gemini(payload, Handler.api_key, Handler.model)
+    else:
+        raise ValueError(f"Unknown backend: {b}")
+    if pre_built:
+        result = merge_prebuilt_with_analysis(result, pre_built)
+    _save_cycle(result)
+    # Unwrap Anthropic envelope → return plain parsed dict (same as what DB stores)
+    if "content" in result and isinstance(result.get("content"), list):
+        try:
+            return json.loads(result["content"][0]["text"])
+        except Exception:
+            pass
+    return result
+
+
 def _last_briefing_sent_at():
     """Return ISO timestamp of most recent briefing send, or None."""
     if not FEATURE_SQLITE:
@@ -2876,8 +2956,47 @@ class Handler(BaseHTTPRequestHandler):
             self._cors(); self.end_headers()
             self.wfile.write(body)
 
+        elif path == "/api/latest":
+            # Instant DB read — no LLM call.
+            # All prod/portal clients use this; central scheduler keeps the DB fresh.
+            row = None
+            if FEATURE_SQLITE:
+                try:
+                    with _db_lock:
+                        c = _db_conn()
+                        row = c.execute(
+                            "SELECT fetched_at, full_json FROM cycles ORDER BY id DESC LIMIT 1"
+                        ).fetchone()
+                        c.close()
+                except Exception as e:
+                    print(f"  [latest] DB error: {e}")
+            if not row:
+                self._reply(200, json.dumps({
+                    "ok": False, "error": "No cycles yet — server fetch pending"
+                }).encode())
+                return
+            try:
+                cycle      = json.loads(row["full_json"] or "{}")
+                fetched_at = row["fetched_at"]
+                try:
+                    last_dt = datetime.fromisoformat(fetched_at).astimezone(timezone.utc)
+                    age_s   = int((datetime.now(timezone.utc) - last_dt).total_seconds())
+                except Exception:
+                    age_s = 0
+                next_in = max(0, _CENTRAL_FETCH_INTERVAL - age_s)
+                self._reply(200, json.dumps({
+                    "ok":                    True,
+                    "cycle":                 cycle,
+                    "fetched_at":            fetched_at,
+                    "age_seconds":           age_s,
+                    "next_fetch_in_seconds": next_in,
+                }).encode())
+            except Exception as e:
+                self._reply(500, json.dumps({"ok": False, "error": str(e)}).encode())
+
         elif path == "/api/cycles":
             # GET /api/cycles?limit=N — return last N full analysis cycles from SQLite
+            # Used by timeline modal so it works across browsers / domains
             limit = 50
             try:
                 qs = parse_qs(self.path.split("?",1)[1]) if "?" in self.path else {}
@@ -3032,6 +3151,36 @@ class Handler(BaseHTTPRequestHandler):
             pass  # client disconnected — normal for browser timeout
 
     def do_POST(self):
+        if self.path == "/api/fetch/trigger":
+            # Localhost-only manual LLM trigger — dev use only.
+            # Runs _do_fetch_cycle() via _reply_chunked (keepalive during LLM wait).
+            # Response format matches /api/latest: {ok, cycle, fetched_at, age_seconds, next_fetch_in_seconds}
+            client_ip = self.client_address[0]
+            if client_ip not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+                self._reply(403, json.dumps({"ok": False, "error": "Localhost only"}).encode())
+                return
+            def _trigger_compute():
+                # Block until any in-progress central fetch finishes (keepalive chunks
+                # keep the browser connection alive during the wait).
+                # Timeout: 11 min (covers worst-case slow LLM + a full central cycle).
+                acquired = _fetch_lock.acquire(blocking=True, timeout=660)
+                if not acquired:
+                    raise TimeoutError("Could not start fetch — still locked after 11 min")
+                try:
+                    result     = _do_fetch_cycle()
+                    fetched_at = datetime.now(timezone.utc).isoformat()
+                    return {
+                        "ok":                    True,
+                        "cycle":                 result,
+                        "fetched_at":            fetched_at,
+                        "age_seconds":           0,
+                        "next_fetch_in_seconds": _CENTRAL_FETCH_INTERVAL,
+                    }
+                finally:
+                    _fetch_lock.release()
+            self._reply_chunked(_trigger_compute)
+            return
+
         if self.path == "/api/briefing/config":
             # POST /api/briefing/config — save config {enabled, telegram_bot_token, ...}
             try:
@@ -3070,6 +3219,16 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path != "/v1/messages":
             self.send_error(404)
+            return
+
+        # Gate /v1/messages to localhost only — remote clients must use /api/latest
+        client_ip = self.client_address[0]
+        if client_ip not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+            self._reply(403, json.dumps({"error": {
+                "type":    "forbidden",
+                "message": "Direct LLM calls are disabled for remote access. "
+                           "Analysis is served centrally — use /api/latest."
+            }}).encode())
             return
 
         try:
@@ -3179,36 +3338,9 @@ def main():
     default_url, default_model = defaults.get(args.backend, ("", ""))
     backend_url = args.url   or default_url
 
-    # If no model specified and backend is ollama, offer interactive selection
-    if not args.model and args.backend == "ollama":
-        try:
-            chk = urllib.request.urlopen(
-                default_url.rstrip("/") + "/api/tags", timeout=4
-            )
-            tags_data = json.loads(chk.read())
-            installed = [m["name"] for m in tags_data.get("models", [])]
-        except Exception:
-            installed = []
-
-        if installed:
-            print("  Installed Ollama models:")
-            for i, name in enumerate(installed, 1):
-                print(f"    {i}) {name}")
-            print()
-            try:
-                raw = input(f"  Select model [1-{len(installed)}, default 1]: ").strip()
-            except (EOFError, KeyboardInterrupt):
-                raw = "1"
-            if raw.isdigit() and 1 <= int(raw) <= len(installed):
-                model = installed[int(raw) - 1]
-            elif raw and not raw.isdigit():
-                model = raw          # typed a model name directly
-            else:
-                model = installed[0] if installed else default_model
-        else:
-            model = default_model
-    else:
-        model = args.model or default_model
+    # Model: always qwen2.5:7b for ollama — hardcoded, no interactive selection.
+    # qwen3.5:9b and other large models cause VRAM contention and slow fetches.
+    model = default_model   # qwen2.5:7b (from defaults dict above)
     api_key     = args.key   or os.environ.get("GROQ_API_KEY","") or \
                                os.environ.get("GEMINI_API_KEY","") or \
                                os.environ.get("OPENAI_API_KEY","")
@@ -3223,22 +3355,7 @@ def main():
     print("\n  ╔══════════════════════════════════════════════════════════╗")
     print("  ║   WB ELECTION INTEL — Local LLM Proxy                   ║")
     print("  ╚══════════════════════════════════════════════════════════╝\n")
-    # Show available local models if Ollama
-    if args.backend == "ollama":
-        import subprocess
-        try:
-            result = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                lines = [l.strip() for l in result.stdout.strip().splitlines() if l.strip() and not l.startswith("NAME")]
-                if lines:
-                    print("  Installed models:")
-                    for l in lines:
-                        name = l.split()[0]
-                        marker = " <-- selected" if name.startswith(model.split(":")[0]) else ""
-                        print(f"    {name}{marker}")
-                    print()
-        except Exception:
-            pass
+    print(f"  Model: {model} (hardcoded — qwen2.5:7b only)")
     # ── Ollama connectivity check ──────────────────────────────────────
     if args.backend == "ollama":
         print("  Checking Ollama connection...")
@@ -3286,6 +3403,48 @@ def main():
 
     # ── Phase 4B: start daily briefing scheduler ──────────────────────────────
     _start_briefing_scheduler()
+
+    # ── Central fetch scheduler ───────────────────────────────────────────────
+    # Fires LLM once every 15 min and stores result in DB.
+    # All prod/portal clients read from DB via /api/latest — no per-user LLM calls.
+    # Dev manual "Fetch & Analyse Now" uses /api/fetch/trigger (localhost-only).
+    def _central_fetch_loop():
+        import time as _t
+        # Decide initial delay based on age of last cycle in DB
+        delay = _CENTRAL_FETCH_INTERVAL
+        if FEATURE_SQLITE:
+            try:
+                with _db_lock:
+                    c = _db_conn()
+                    row = c.execute(
+                        "SELECT fetched_at FROM cycles ORDER BY id DESC LIMIT 1"
+                    ).fetchone()
+                    c.close()
+                if row:
+                    last_dt = datetime.fromisoformat(row["fetched_at"]).astimezone(timezone.utc)
+                    age     = (datetime.now(timezone.utc) - last_dt).total_seconds()
+                    delay   = max(30, _CENTRAL_FETCH_INTERVAL - age)
+                else:
+                    delay = 60   # no data at all — fetch soon after startup
+            except Exception:
+                delay = 60
+        print(f"  [central-fetch] Scheduler started — first fetch in {int(delay)}s")
+        _t.sleep(delay)
+        while True:
+            if not _fetch_lock.acquire(blocking=False):
+                print("  [central-fetch] Skipping tick — manual fetch in progress")
+                _t.sleep(60)
+                continue
+            try:
+                print("  [central-fetch] Starting scheduled fetch...")
+                _do_fetch_cycle()
+                print(f"  [central-fetch] Done — next in {_CENTRAL_FETCH_INTERVAL//60} min")
+            except Exception as e:
+                print(f"  [central-fetch] Error: {e}")
+            finally:
+                _fetch_lock.release()
+            _t.sleep(_CENTRAL_FETCH_INTERVAL)
+    threading.Thread(target=_central_fetch_loop, daemon=True, name="central-fetch").start()
 
     # Pre-warm wire cache AND keep it warm with a background refresh thread.
     # Wire cache TTL is 10 min; we refresh every 9 min so page loads always

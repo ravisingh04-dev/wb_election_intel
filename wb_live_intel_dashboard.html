@@ -430,9 +430,12 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 <div class="topbar">
   <div class="logo">[ OSINT ]</div>
   <div class="sep"></div>
-  <div>
-    <div class="hdr-district">WB Election Intel · Bankura</div>
-    <div class="hdr-sub">Phase 1 · 23 April 2026</div>
+  <div style="display:flex;align-items:center;gap:10px">
+    <div>
+      <div class="hdr-district">WB Election Intel · Bankura</div>
+      <div class="hdr-sub">Phase 1 · 23 April 2026</div>
+    </div>
+    <button onclick="openDisclaimer()" style="background:none;border:1px solid var(--amber);color:var(--amber);border-radius:4px;padding:3px 9px;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.04em;font-family:inherit;white-space:nowrap" title="Read disclaimer">⚠ DISCLAIMER</button>
   </div>
   <div class="hdr-right">
     <div class="pulse-dot" id="liveDot"></div>
@@ -444,6 +447,32 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
   </div>
 </div>
 
+<!-- DISCLAIMER MODAL -->
+<div id="disclaimerModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:var(--bg2);border:1px solid var(--amber);border-radius:10px;max-width:560px;width:90%;padding:28px 28px 22px;position:relative;box-shadow:0 8px 40px rgba(0,0,0,.5)">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+      <span style="font-size:20px">⚠️</span>
+      <div style="font-size:14px;font-weight:800;color:var(--amber);letter-spacing:.04em">DISCLAIMER</div>
+    </div>
+
+    <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:10px;letter-spacing:.02em">Academic Research Project — No Commercial Interest</div>
+
+    <div style="font-size:11.5px;color:var(--text2);line-height:1.7;display:flex;flex-direction:column;gap:10px">
+      <p style="margin:0">This platform is an <b style="color:var(--text)">independent academic project</b> developed solely for research and electoral observation purposes. It has <b style="color:var(--text)">no commercial interest</b> of any kind.</p>
+
+      <p style="margin:0">All information displayed here is collated from <b style="color:var(--text)">publicly available open-source platforms</b> — including news aggregators, social media, and public databases already accessible on the internet. This platform does not generate, fabricate, or alter any information.</p>
+
+      <p style="margin:0;padding:8px 12px;background:rgba(251,191,36,0.08);border-left:3px solid var(--amber);border-radius:0 4px 4px 0"><b style="color:var(--amber)">Please verify the accuracy and veracity of all information independently before making any decision.</b> The creators of this platform accept no liability for any action taken on the basis of information displayed here.</p>
+
+      <p style="margin:0">This website is <b style="color:var(--text)">not affiliated with, endorsed by, or connected to</b> any government body, political party, the Election Commission of India (ECI), or any other official authority.</p>
+    </div>
+
+    <div style="margin-top:20px;display:flex;justify-content:flex-end">
+      <button onclick="closeDisclaimer()" style="background:var(--amber);color:#000;border:none;border-radius:5px;padding:6px 20px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">I Understand</button>
+    </div>
+  </div>
+</div>
+
 <div class="main">
 
   <!-- SIDEBAR -->
@@ -451,8 +480,8 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
     <div class="sidebar-section">
       <div class="sid-label">Controls</div>
-      <button class="ctrl-btn primary" onclick="runFetch(true)">
-        <span class="btn-icon">↻</span> Fetch &amp; Analyse Now
+      <button class="ctrl-btn primary" onclick="runFetch(true)" id="fetchNowBtn">
+        <span class="btn-icon">↻</span> <span id="fetchNowLabel">Refresh Data</span>
       </button>
       <button class="ctrl-btn danger" onclick="toggleMode()" id="modeToggleBtn" style="display:none">
         <span class="btn-icon">🚨</span> Switch to Election Day Mode
@@ -1177,15 +1206,18 @@ function toggleMode(){
   scheduleNext();
 }
 
-function scheduleNext(){
+function scheduleNext(next_in_s){
   if(refreshTimer) clearTimeout(refreshTimer);
   if(countdownTimer) clearInterval(countdownTimer);
-  var interval = isElectionMode ? REFRESH_ELECTION : REFRESH_NORMAL;
-  nextRefreshAt  = Date.now() + interval;
-  progressStart  = Date.now();
-  progressDuration = interval;
-  refreshTimer   = setTimeout(function(){ runFetch(false); }, interval);
-  countdownTimer = setInterval(updateCountdown, 1000);
+  // Poll /api/latest every 60s (lightweight check — re-renders only if data changed)
+  var pollMs   = 60 * 1000;
+  // Countdown bar tracks server-side next refresh time
+  var serverMs = Math.max(pollMs, (next_in_s || _CENTRAL_FETCH_INTERVAL_MS/1000) * 1000);
+  nextRefreshAt    = Date.now() + serverMs;
+  progressStart    = Date.now();
+  progressDuration = serverMs;
+  refreshTimer     = setTimeout(function(){ runFetch(false); }, pollMs);
+  countdownTimer   = setInterval(updateCountdown, 1000);
   updateCountdown();
 }
 
@@ -1209,28 +1241,13 @@ function setStatus(txt,color){
   dot.style.background = color ? color.replace('var(--','').replace(')','') : '#4ade80';
 }
 
-/* ─── API CALL (local proxy) ─── */
-async function callLLM(prompt, systemPrompt){
-  var headers = {'Content-Type':'application/json'};
-  var body = {
-    system: systemPrompt,
-    messages:[{role:'user',content:prompt}]
-  };
-  // Auto-detect port: when served by proxy use same origin; fallback to 5050 for file:// open
-  var endpoint = (location.protocol === 'http:' || location.protocol === 'https:')
-    ? location.origin + '/v1/messages'
-    : 'http://localhost:5050/v1/messages';
-  var ctrl = new AbortController();
-  var fetchTimer = setTimeout(function(){ ctrl.abort(); }, 660000); // 11 min (covers large models)
-  var resp;
-  try{
-    resp = await fetch(endpoint,{method:'POST',headers:headers,body:JSON.stringify(body),signal:ctrl.signal});
-  } finally { clearTimeout(fetchTimer); }
-
-  var data = await resp.json().catch(()=>({}));
-  if(!resp.ok||data.error){ throw new Error(data.error?.message||'Proxy error '+resp.status); }
-  return data;
-}
+/* ─── Central fetch architecture ───────────────────────────────────────────
+   All clients (prod/portal) read from /api/latest — instant DB read, no LLM.
+   Localhost dev can trigger a real LLM fetch via /api/fetch/trigger.
+   The proxy runs _do_fetch_cycle() every 15 min centrally.
+─────────────────────────────────────────────────────────────────────────── */
+var _lastFetchedAt = null;   // track last known server cycle timestamp (skip re-render if unchanged)
+var _isLocalhost   = (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
 
 function extractText(data){
   if(data._combinedText) return data._combinedText;
@@ -1295,143 +1312,177 @@ function repairJSON(text){
 /* ─── MAIN FETCH CYCLE ─── */
 var _fetchInFlight = false;   // prevent overlapping requests
 
-async function runFetch(manual){
-  // Guard: skip if a fetch is already running (single LLM pipeline)
-  if(_fetchInFlight){
-    console.log('[runFetch] skipped — previous fetch still in progress');
+/* ── Normalise LLM field that may be string or array ── */
+function _toArr(v){ return Array.isArray(v) ? v : (v ? [v] : []); }
+
+/* ── Shared render: applies a parsed cycle to all panels ── */
+function _renderParsed(parsed, ts){
+  var m  = parsed.metrics||{};
+  document.getElementById('mTotalSignals').textContent = m.totalSignals||0;
+  document.getElementById('mHighAlert').textContent    = m.highAlerts||0;
+  document.getElementById('mViolence').textContent     = m.violenceReports||0;
+  document.getElementById('mTotalTrend').textContent   = ts;
+  var tl   = (m.threatLevel||'LOW').toUpperCase();
+  var tlEl = document.getElementById('mThreat');
+  tlEl.textContent = tl;
+  tlEl.style.color = tl==='CRITICAL'||tl==='HIGH' ? 'var(--red)' : tl==='MODERATE' ? 'var(--amber)' : 'var(--green)';
+  document.getElementById('mThreatTrend').textContent = ts;
+  alertCount += (m.highAlerts||0);
+
+  renderFeedItems('fbBankura',  parsed.bankura);
+  renderFeedItems('fbSurrounds',parsed.surrounds);
+  renderFeedItems('fbWB',       parsed.statewide);
+  renderFeedItems('fbParties',  parsed.parties);
+  renderFeedItems('fbAlerts',   parsed.alerts);
+  renderFeedItems('fbMCC',      parsed.official);
+  renderFeedItems('fbBangla',   parsed.bangla);
+
+  var an = parsed.analysis||{};
+  var bankuraHtml = '';
+  bankuraHtml += '<div class="section"><div class="sec-title">Situation headline</div><p class="highlight">'+(an.headline||'No headline')+'</p></div>';
+  bankuraHtml += '<div class="section"><div class="sec-title">Bankura district</div><p>'+(an.bankuraSituation||'—')+'</p></div>';
+  if(an.keyRisks&&an.keyRisks.length){
+    bankuraHtml+='<div class="section"><div class="sec-title">Key risks</div>';
+    _toArr(an.keyRisks).forEach(function(r){ bankuraHtml+='<p class="risk">▸ '+r+'</p>'; });
+    bankuraHtml+='</div>';
+  }
+  if(an.observerActions&&an.observerActions.length){
+    bankuraHtml+='<div class="section"><div class="sec-title">Observer actions</div>';
+    _toArr(an.observerActions).forEach(function(a){ bankuraHtml+='<p class="safe">✓ '+a+'</p>'; });
+    bankuraHtml+='</div>';
+  }
+  document.getElementById('analysisBankuraBody').innerHTML = bankuraHtml;
+  setTimeout(_matchWireHeight, 50);
+
+  var statewideHtml = '';
+  statewideHtml += '<div class="section"><div class="sec-title">Surrounding districts</div><p>'+(an.surroundingSituation||'—')+'</p></div>';
+  if(an.partyPositions){
+    statewideHtml += '<div class="section"><div class="sec-title">Party positions &amp; allegations</div><p style="color:var(--purple)">'+(an.partyPositions||'—')+'</p></div>';
+  }
+  statewideHtml+='<div class="section"><div class="sec-title">Disinfo watch</div><p>'+(an.disinfoAlerts||'None detected')+'</p></div>';
+  statewideHtml+='<div class="section"><div class="sec-title">Overall assessment</div><p>'+(an.overallAssessment||'—')+'</p></div>';
+  document.getElementById('analysisStatewideBody').innerHTML = statewideHtml;
+  document.getElementById('analysisTimestamp').textContent = 'Updated: '+ts;
+
+  if(tl!=='LOW'){
+    document.getElementById('alertBanner').classList.add('show');
+    document.getElementById('alertBannerText').textContent = '⚠️ '+(an.headline||'High-priority situation')+' — See analysis below.';
+  } else {
+    document.getElementById('alertBanner').classList.remove('show');
+  }
+  if(parsed.topicCounts){
+    parsed.topicCounts.forEach(function(cnt,i){ var el=document.getElementById('cnt-'+i); if(el) el.textContent=cnt||0; });
+  }
+  updateCharts(m, parsed.topicCounts);
+  updateDistrictMap(an);
+  updateTicker((parsed.alerts||[]).concat(parsed.bankura||[]));
+  renderFigureMonitor(parsed.figureMentions);
+  setTimeout(loadFiguresNews, 100);
+  showContextImages(tl);
+  if(FEATURE_ALERTS) checkAlerts(parsed);
+  if(FEATURE_SENTIMENT_TREND){ saveTrendPoint(ts, parsed); renderTrendChart(); }
+  var _lrt = document.getElementById('lastRunTime'); if(_lrt) _lrt.textContent = ts;
+  currentParsed = parsed; window._lastParsed = parsed;
+  if(parsed.acMetrics){ updateMapLayer(parsed.acMetrics); _autoShowMap(parsed.acMetrics); }
+  if(isElectionMode && parsed.acMetrics){
+    var today = new Date().toISOString().slice(0,10);
+    if(today==='2026-04-23'){
+      fetch('/api/turnout').then(function(r){return r.json();}).then(function(d){
+        updateMapTurnout(d.districts||{}); updateMapModeBadge();
+      }).catch(function(){});
+    }
+  }
+}
+
+/* ── Apply /api/latest response: render if new data, schedule next poll ── */
+function _applyLatestResponse(data){
+  var parsed     = data.cycle;
+  var fetched_at = data.fetched_at || '';
+  var age_s      = data.age_seconds || 0;
+  var next_in    = data.next_fetch_in_seconds || _CENTRAL_FETCH_INTERVAL_MS / 1000;
+
+  if(fetched_at && fetched_at === _lastFetchedAt){
+    // Data unchanged — just update status and reschedule
+    _fetchInFlight = false;
+    _updateFetchStatus(age_s, next_in);
+    scheduleNext(next_in);
     return;
   }
+  _lastFetchedAt = fetched_at;
+  cycleCount++;
+  var ts = fetched_at
+    ? new Date(fetched_at).toLocaleString('en-IN')
+    : new Date().toLocaleString('en-IN');
+
+  _renderParsed(parsed, ts);
+  pushCycle(ts, parsed);
+  _fetchInFlight = false;
+  document.getElementById('progressBar').style.width = '100%';
+  _updateFetchStatus(age_s, next_in);
+  scheduleNext(next_in);
+}
+
+/* ── Status label showing refresh age + next refresh countdown ── */
+var _CENTRAL_FETCH_INTERVAL_MS = 15 * 60 * 1000;
+function _updateFetchStatus(age_s, next_in_s){
+  var ageMin  = Math.round(age_s / 60);
+  var nextMin = Math.ceil(next_in_s / 60);
+  var label   = ageMin < 1 ? 'LIVE' : 'Updated '+ageMin+'m ago';
+  var color   = ageMin < 5 ? '#4ade80' : ageMin < 20 ? '#fbbf24' : '#94a3b8';
+  setStatus(label, color);
+}
+
+/* ── Main fetch entry point ── */
+async function runFetch(manual){
+  if(_fetchInFlight){ console.log('[runFetch] skipped — in progress'); return; }
   _fetchInFlight = true;
 
-  setStatus('FETCHING RSS…','#fbbf24');
-  document.getElementById('progressBar').style.width='10%';
-  cycleCount++;
-  var now = new Date();
-  var ts  = now.toLocaleString('en-IN');
+  // Dev localhost + manual button → trigger real LLM fetch (chunked, ~60-90s)
+  if(manual && _isLocalhost){
+    setStatus('FETCHING RSS…','#fbbf24');
+    document.getElementById('progressBar').style.width = '5%';
+    var ctrl = new AbortController();
+    var timer = setTimeout(function(){ ctrl.abort(); }, 660000);
+    try{
+      var resp = await fetch(window.location.origin+'/api/fetch/trigger',
+        {method:'POST', signal:ctrl.signal});
+      clearTimeout(timer);
+      // Chunked response — strip leading keepalive whitespace then parse JSON
+      var raw  = await resp.text();
+      var start = raw.indexOf('{');
+      var data  = JSON.parse(start >= 0 ? raw.slice(start) : raw);
+      if(!data.ok) throw new Error(data.error||'Trigger failed');
+      _applyLatestResponse(data);
+    }catch(err){
+      clearTimeout(timer);
+      _fetchInFlight = false;
+      var msg = err.name==='AbortError' ? 'Timed out — proxy may be busy' : err.message;
+      setStatus('ERROR','#f87171');
+      document.getElementById('analysisBankuraBody').innerHTML =
+        '<div class="empty-state" style="color:var(--red)"><span class="empty-icon">✕</span>'+
+        'Fetch failed: '+msg+'<br><br>'+
+        '<span style="color:var(--text3);font-size:12px">Check that proxy_local.py is running · Auto-retry next cycle</span></div>';
+      document.getElementById('analysisStatewideBody').innerHTML = '';
+      scheduleNext(_CENTRAL_FETCH_INTERVAL_MS / 1000);
+    }
+    return;
+  }
 
-  var system = `Election intelligence analyst. Bankura district observer, WB 2026 Assembly Election. Phase 1: 23 April 2026. Current time: ${ts}.`;
-  var prompt = `Analyse the WB election situation for the Bankura observer. Current time: ${ts}.`;
-
+  // All other clients (prod/portal/non-manual) → instant DB read
+  setStatus('REFRESHING…','#38bdf8');
   try{
-    var data   = await callLLM(prompt, system);
-    setStatus('ANALYSING…','#38bdf8');
-    document.getElementById('progressBar').style.width='65%';
-    var text   = extractText(data);
-    var parsed = repairJSON(text);
-    if(!parsed) throw new Error('JSON parse failed. Snippet: '+text.replace(/\n/g,' ').substring(0,300));
-
-    var m = parsed.metrics||{};
-    document.getElementById('mTotalSignals').textContent = m.totalSignals||0;
-    document.getElementById('mHighAlert').textContent    = m.highAlerts||0;
-    document.getElementById('mViolence').textContent     = m.violenceReports||0;
-    document.getElementById('mTotalTrend').textContent   = ts;
-    var tl   = (m.threatLevel||'LOW').toUpperCase();
-    var tlEl = document.getElementById('mThreat');
-    tlEl.textContent  = tl;
-    tlEl.style.color  = tl==='CRITICAL'||tl==='HIGH' ? 'var(--red)' : tl==='MODERATE' ? 'var(--amber)' : 'var(--green)';
-    document.getElementById('mThreatTrend').textContent = ts;
-
-    alertCount += (m.highAlerts||0);
-
-    renderFeedItems('fbBankura',  parsed.bankura);
-    renderFeedItems('fbSurrounds',parsed.surrounds);
-    renderFeedItems('fbWB',       parsed.statewide);
-    renderFeedItems('fbParties',  parsed.parties);
-    renderFeedItems('fbAlerts',   parsed.alerts);
-    renderFeedItems('fbMCC',      parsed.official);
-    renderFeedItems('fbBangla',   parsed.bangla);
-
-    var an = parsed.analysis||{};
-
-    // ── LEFT PANEL: Bankura-specific ──────────────────────────────────────
-    var bankuraHtml = '';
-    bankuraHtml += '<div class="section"><div class="sec-title">Situation headline</div><p class="highlight">'+(an.headline||'No headline')+'</p></div>';
-    bankuraHtml += '<div class="section"><div class="sec-title">Bankura district</div><p>'+(an.bankuraSituation||'—')+'</p></div>';
-    if(an.keyRisks&&an.keyRisks.length){
-      bankuraHtml+='<div class="section"><div class="sec-title">Key risks</div>';
-      an.keyRisks.forEach(function(r){ bankuraHtml+='<p class="risk">▸ '+r+'</p>'; });
-      bankuraHtml+='</div>';
-    }
-    if(an.observerActions&&an.observerActions.length){
-      bankuraHtml+='<div class="section"><div class="sec-title">Observer actions</div>';
-      an.observerActions.forEach(function(a){ bankuraHtml+='<p class="safe">✓ '+a+'</p>'; });
-      bankuraHtml+='</div>';
-    }
-    document.getElementById('analysisBankuraBody').innerHTML = bankuraHtml;
-    setTimeout(_matchWireHeight, 50); // re-match after content reflow
-
-    // ── CENTRE PANEL: Statewide context ───────────────────────────────────
-    var statewideHtml = '';
-    statewideHtml += '<div class="section"><div class="sec-title">Surrounding districts</div><p>'+(an.surroundingSituation||'—')+'</p></div>';
-    if(an.partyPositions){
-      statewideHtml += '<div class="section"><div class="sec-title">Party positions &amp; allegations</div><p style="color:var(--purple)">'+(an.partyPositions||'—')+'</p></div>';
-    }
-    statewideHtml+='<div class="section"><div class="sec-title">Disinfo watch</div><p>'+(an.disinfoAlerts||'None detected')+'</p></div>';
-    statewideHtml+='<div class="section"><div class="sec-title">Overall assessment</div><p>'+(an.overallAssessment||'—')+'</p></div>';
-    document.getElementById('analysisStatewideBody').innerHTML = statewideHtml;
-    document.getElementById('analysisTimestamp').textContent = 'Updated: '+ts;
-
-    if(tl!=='LOW'){
-      document.getElementById('alertBanner').classList.add('show');
-      document.getElementById('alertBannerText').textContent = '⚠️ '+( an.headline||'High-priority situation') + ' — See analysis below.';
-    } else {
-      document.getElementById('alertBanner').classList.remove('show');
-    }
-
-    if(parsed.topicCounts){
-      parsed.topicCounts.forEach(function(cnt,i){
-        var el=document.getElementById('cnt-'+i); if(el) el.textContent=cnt||0;
-      });
-    }
-
-    updateCharts(m, parsed.topicCounts);
-    updateDistrictMap(an);
-    updateTicker((parsed.alerts||[]).concat(parsed.bankura||[]));
-    renderFigureMonitor(parsed.figureMentions);
-    setTimeout(loadFiguresNews, 100);   // inject news strips after cards render
-    showContextImages(tl);
-
-    /* ── Phase 1 hooks ── */
-    if(FEATURE_ALERTS)          checkAlerts(parsed);
-    if(FEATURE_SENTIMENT_TREND){ saveTrendPoint(ts, parsed); renderTrendChart(); }
-
-    var _lrt = document.getElementById('lastRunTime'); if(_lrt) _lrt.textContent = ts;
-    currentParsed = parsed;
-    window._lastParsed = parsed;   // map popup needs this
-
-    /* ── Phase 4: update map layer ── */
-    if(parsed.acMetrics){
-      updateMapLayer(parsed.acMetrics);
-      _autoShowMap(parsed.acMetrics);
-    }
-    if(isElectionMode && parsed.acMetrics){
-      var today = new Date().toISOString().slice(0,10);
-      if(today === '2026-04-23'){
-        fetch('/api/turnout').then(function(r){return r.json();}).then(function(d){
-          updateMapTurnout(d.districts||{});
-          updateMapModeBadge();
-        }).catch(function(){});
-      }
-    }
-
-    pushCycle(ts, parsed);
-    setStatus('LIVE','#4ade80');
+    var r    = await fetch(window.location.origin+'/api/latest');
+    var data = await r.json();
+    if(!data.ok) throw new Error(data.error||'No data available yet');
+    _applyLatestResponse(data);
+  }catch(err){
     _fetchInFlight = false;
-    scheduleNext();
-
-  } catch(err){
-    _fetchInFlight = false;
-    var isAbort = err.name === 'AbortError';
-    var msg = isAbort
-      ? 'Request timed out after 5 min — proxy may be overloaded. Will retry.'
-      : err.message;
     setStatus('ERROR','#f87171');
-    var errHtml = '<div class="empty-state" style="color:var(--red)"><span class="empty-icon">✕</span>'+
-      'Fetch failed: '+msg+'<br><br>'+
+    document.getElementById('analysisBankuraBody').innerHTML =
+      '<div class="empty-state" style="color:var(--red)"><span class="empty-icon">✕</span>'+
+      'Refresh failed: '+err.message+'<br><br>'+
       '<span style="color:var(--text3);font-size:12px">Check that proxy_local.py is running · Auto-retry next cycle</span></div>';
-    document.getElementById('analysisBankuraBody').innerHTML = errHtml;
-    document.getElementById('analysisStatewideBody').innerHTML = '';
-    scheduleNext();
+    scheduleNext(_CENTRAL_FETCH_INTERVAL_MS / 1000);
   }
 }
 
@@ -1830,47 +1881,15 @@ function applyParsedCycle(parsed, label){
   setStatus('CACHED','#94a3b8');
 }
 
-var _cacheAgeMs = null;   // set by loadLatestCycle; used to skip immediate LLM call
-
-async function loadLatestCycle(){
-  try{
-    var base = (location.protocol==='http:'||location.protocol==='https:')
-      ? location.origin : 'http://localhost:5050';
-    var r = await fetch(base + '/api/latest-cycle');
-    if(r.status === 204) return;   // no cycle saved yet
-    var data = await r.json();
-    if(data && data.metrics){
-      applyParsedCycle(data, 'Cached ');
-      if(data._fetched_at){
-        _cacheAgeMs = Date.now() - new Date(data._fetched_at).getTime();
-      }
-    }
-  } catch(e){ /* no cached data — wait for LLM */ }
-}
-
 /* ═══════ AUTO-START + VISIBILITY CATCH-UP ═══════ */
 
-var CACHE_FRESH_MS = 5 * 60 * 1000;  // 5 minutes
-
-// 1. Auto-start: load cached cycle immediately; skip LLM fetch if cache < 5 min old
+// On load: fetch /api/latest — instant DB read, no LLM. Schedules 60s poll.
 document.addEventListener('DOMContentLoaded', function(){
-  // First load in this browser tab session always fires LLM immediately.
-  // Subsequent reloads within the same tab session use the 5-min defer logic.
-  var isFirstLoad = !sessionStorage.getItem('wb_intel_session_started');
-  sessionStorage.setItem('wb_intel_session_started', '1');
-
-  loadLatestCycle().then(function(){
-    if(!isFirstLoad && _cacheAgeMs !== null && _cacheAgeMs < CACHE_FRESH_MS){
-      // Cache is fresh and not the first load — defer until interval expires
-      var delayMs = Math.max(10000, CACHE_FRESH_MS - _cacheAgeMs);
-      console.log('[init] Cache is ' + Math.round(_cacheAgeMs/1000) + 's old — deferring LLM fetch by ' + Math.round(delayMs/1000) + 's');
-      setStatus('CACHED','#94a3b8');
-      refreshTimer = setTimeout(function(){ runFetch(false); }, delayMs);
-    } else {
-      // First load OR stale/no cache — fetch immediately
-      setTimeout(function(){ runFetch(false); }, 1200);
-    }
-  });
+  // Set button label: localhost dev gets LLM trigger, prod/portal gets DB refresh
+  var fetchLabel = document.getElementById('fetchNowLabel');
+  if(fetchLabel) fetchLabel.textContent = _isLocalhost ? 'Fetch & Analyse Now' : 'Refresh Data';
+  setStatus('LOADING…','#94a3b8');
+  setTimeout(function(){ runFetch(false); }, 800);
 });
 
 // 2. Page Visibility API — tab comes back from background/sleep
@@ -1946,6 +1965,9 @@ var FIGURES_META = {
 function renderFigureMonitor(figureMentions){
   var grid = document.getElementById('figureMonitorGrid');
   if(!grid || !figureMentions || !figureMentions.length) return;
+  // Suppress NEW badge for 15s after a fresh LLM cycle render so the
+  // subsequent loadFiguresNews re-sort doesn't fire spurious "new entrant" alerts
+  _figBadgeSuppressUntil = Date.now() + 15000;
 
   var totalMentions = figureMentions.reduce(function(s,f){ return s + (f.count||0); }, 0);
   var activeFigs    = figureMentions.filter(function(f){ return (f.count||0) > 0; }).length;
@@ -2013,8 +2035,9 @@ function renderFigureMonitor(figureMentions){
 }
 
 /* ── Show top 4 active figure cards; hide the rest ────────────────────────── */
-var _prevTopFigures = [];   // names shown last time — used for blink detection
-var _figExpanded    = false; // tracks whether the "show more" section is open
+var _prevTopFigures   = [];   // names shown last time — used for blink detection
+var _figExpanded      = false; // tracks whether the "show more" section is open
+var _figBadgeSuppressUntil = 0; // suppress NEW badge during initial render+news-load window
 
 function _applyFigureVisibility(){
   var grid = document.getElementById('figureMonitorGrid');
@@ -2093,10 +2116,14 @@ function _applyFigureVisibility(){
       : cards.length + ' candidates monitored';
   }
 
-  // Blink badge if new names entered the top group
-  var newNames = nowTop.filter(function(n){ return n && _prevTopFigures.indexOf(n) === -1; });
-  if(newNames.length && _prevTopFigures.length){
-    _showFigNewBadge(newNames[0]);
+  // Blink badge if new names entered the top group — but only outside the suppress window
+  // and only if the top group was already established (not the first render)
+  if(Date.now() > _figBadgeSuppressUntil && _prevTopFigures.length){
+    var newNames = nowTop.filter(function(n){ return n && _prevTopFigures.indexOf(n) === -1; });
+    if(newNames.length){
+      // Show the highest-scoring new entrant (first in already-sorted list)
+      _showFigNewBadge(newNames[0]);
+    }
   }
   _prevTopFigures = nowTop;
 }
@@ -3047,6 +3074,9 @@ function _applyTheme(dark){
   var btn = document.getElementById('themeToggleBtn');
   if(btn) btn.textContent = dark ? '☀\uFE0F Light' : '🌙 Dark';
 }
+
+function openDisclaimer(){ document.getElementById('disclaimerModal').style.display='flex'; }
+function closeDisclaimer(){ document.getElementById('disclaimerModal').style.display='none'; }
 
 function toggleTheme(){
   var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
