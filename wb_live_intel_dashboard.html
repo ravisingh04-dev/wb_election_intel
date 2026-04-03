@@ -566,11 +566,27 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
   /* ── Analysis panel: taller on mobile ── */
   .analysis-body{max-height:160px}
 
-  /* ── Trend panel: exact height = header(33px) + chart(70px), no dead space ── */
-  .trend-panel{overflow:hidden;margin-bottom:0;height:auto}
-  .trend-chart-wrap{height:70px;padding:4px 8px 0}
-  .trend-legend{display:none}
-  .trend-header{padding:6px 10px;font-size:12px}
+  /* ── Trend panel: exact fit, zero dead space ── */
+  .trend-panel{
+    overflow:hidden;margin-bottom:0;
+    display:flex;flex-direction:column;
+    height:auto !important
+  }
+  .trend-header{padding:6px 10px;font-size:12px;flex-shrink:0}
+  .trend-chart-wrap{
+    height:72px !important;
+    padding:3px 8px 3px !important;
+    flex-shrink:0;overflow:hidden;
+    position:relative
+  }
+  .trend-chart-wrap canvas{
+    display:block !important;
+    width:100% !important;
+    height:100% !important;
+    max-height:66px
+  }
+  .trend-legend{display:none !important;height:0;padding:0;margin:0;overflow:hidden}
+  .trend-meta{display:none}
 
   /* ── Turnout ── */
   .turnout-row{grid-template-columns:repeat(3,1fr);gap:5px}
@@ -608,7 +624,8 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
   .figure-monitor-grid{grid-template-columns:1fr 1fr}
   .feeds-grid{gap:6px}
   .content{padding:6px;gap:8px}
-  .trend-chart-wrap{height:60px}
+  .trend-chart-wrap{height:60px !important}
+  .trend-chart-wrap canvas{max-height:54px}
 }
 </style>
 </head>
