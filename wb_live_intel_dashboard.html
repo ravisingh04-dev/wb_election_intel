@@ -538,16 +538,24 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
   /* ── Wire: hidden on mobile (content flows into priority feed) ── */
   .wire-panel{display:none !important}
 
-  /* ── Priority feed + ticker: show on mobile ── */
+  /* ── Priority feed: show on mobile ── */
   #mobPriorityFeed{display:block}
-  #mobTickerStrip{display:flex;position:sticky;top:48px;z-index:150;margin:0 -8px}
+
+  /* ── Ticker: fixed strip flush under topbar, full viewport width, outside content flow ── */
+  #mobTickerStrip{
+    display:flex;
+    position:fixed;top:48px;left:0;right:0;z-index:190;
+    border-radius:0;margin:0
+  }
+
+  /* ── Push content below the fixed ticker (28px ticker height) ── */
+  .main{padding-top:28px}
 
   /* ── Desktop feeds-grid: hide on mobile ── */
   .feeds-grid{display:none !important}
 
   /* ── Layout order (content is flex-direction:column) ── */
   .content{display:flex;flex-direction:column}
-  #mobTickerStrip{order:0}
   .alert-banner{order:1}
   .metrics-row{order:2}
   #mobPriorityFeed{order:3}
@@ -555,9 +563,12 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
   .intel-grid{order:5}
   .charts-row{order:6}
 
-  /* Trend panel: tight fit — no empty space */
-  .trend-panel{overflow:hidden}
-  .trend-chart-wrap{height:70px;padding:4px 8px 2px}
+  /* ── Analysis panel: taller on mobile ── */
+  .analysis-body{max-height:160px}
+
+  /* ── Trend panel: exact height = header(33px) + chart(70px), no dead space ── */
+  .trend-panel{overflow:hidden;margin-bottom:0;height:auto}
+  .trend-chart-wrap{height:70px;padding:4px 8px 0}
   .trend-legend{display:none}
   .trend-header{padding:6px 10px;font-size:12px}
 
@@ -587,6 +598,8 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 /* ── VERY SMALL SCREENS (≤420px) ── */
 @media(max-width:420px){
   .topbar{height:44px}
+  #mobTickerStrip{top:44px}
+  .main{padding-top:28px}
   .sidebar{top:44px}
   .sidebar-backdrop{top:44px}
   .metrics-row{grid-template-columns:1fr 1fr}
@@ -595,8 +608,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
   .figure-monitor-grid{grid-template-columns:1fr 1fr}
   .feeds-grid{gap:6px}
   .content{padding:6px;gap:8px}
-  .wire-panel{height:160px}
-  .trend-chart-wrap{height:65px}
+  .trend-chart-wrap{height:60px}
 }
 </style>
 </head>
