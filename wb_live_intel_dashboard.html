@@ -699,7 +699,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
     <!-- Disclaimer shortcut inside sidebar — only visible on mobile via CSS -->
     <button id="disclaimerSidebarBtn" class="ctrl-btn" onclick="openDisclaimer()" style="margin-bottom:2px">
-      <span class="btn-icon"></span> Disclaimer
+      <span class="btn-icon">⚠️</span> Disclaimer
     </button>
 
     <div class="sidebar-section">
@@ -708,24 +708,24 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
         <span class="btn-icon">↻</span> <span id="fetchNowLabel">Refresh Data</span>
       </button>
       <button class="ctrl-btn danger" onclick="toggleMode()" id="modeToggleBtn" style="display:none">
-        <span class="btn-icon"></span> Switch to Election Day Mode
+        <span class="btn-icon">🚨</span> Switch to Election Day Mode
       </button>
     </div>
 
     <div class="sidebar-section">
       <div class="sid-label">Memory &amp; timeline</div>
       <button class="ctrl-btn" onclick="openTimeline()">
-        <span class="btn-icon"></span> View election timeline
+        <span class="btn-icon">📜</span> View election timeline
       </button>
       <button class="ctrl-btn" onclick="openVideoExport()">
-        <span class="btn-icon"></span> Export as video
+        <span class="btn-icon">🎬</span> Export as video
       </button>
       <div class="stat-mini">
         <div class="stat-mini-val" id="memCount" style="color:var(--purple)">0</div>
         <div class="stat-mini-lbl">Cycles stored in memory</div>
       </div>
       <button class="ctrl-btn tl-danger" style="font-size:11px;padding:6px 10px" onclick="clearMemory()">
-        <span class="btn-icon"></span> Clear stored memory
+        <span class="btn-icon">🗑</span> Clear stored memory
       </button>
     </div>
 
@@ -812,7 +812,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
     <div class="sidebar-section" id="briefingSection">
       <div class="sid-label">Telegram</div>
       <div style="display:flex;align-items:center;gap:7px;padding:7px 9px;background:var(--bg3);border:1px solid var(--border);border-radius:6px">
-        
+        <span style="font-size:15px">📢</span>
         <div>
           <div style="font-size:11px;font-weight:600;color:var(--text)">WB Elections Summary</div>
           <div style="font-size:9px;color:var(--text3);margin-top:1px">Telegram channel</div>
@@ -824,7 +824,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
     <div class="sidebar-section">
       <div class="sid-label">Article Digest</div>
       <button class="ctrl-btn" onclick="openDigest()">
-        <span class="btn-icon"></span> Night Digest
+        <span class="btn-icon">📚</span> Night Digest
         <span class="digest-badge" id="digestUnreadBadge">0</span>
       </button>
       <div class="stat-mini">
@@ -1430,11 +1430,11 @@ function toggleMode(){
   var btn   = document.getElementById('modeToggleBtn');
   if(isElectionMode){
     badge.textContent='ELECTION DAY'; badge.className='mode-badge mode-election';
-    btn.innerHTML='Switch to Normal Mode';
+    btn.innerHTML='🔵 Switch to Normal Mode';
     progressDuration=REFRESH_ELECTION;
   } else {
     badge.textContent='NORMAL MODE'; badge.className='mode-badge';
-    btn.innerHTML='Election Day Mode';
+    btn.innerHTML='🚨 Election Day Mode';
     progressDuration=REFRESH_NORMAL;
   }
   scheduleNext();
@@ -1767,16 +1767,16 @@ function _notifBtnUpdate(){
   if(!btn || !badge) return;
   var perm = (typeof Notification !== 'undefined') ? Notification.permission : 'unsupported';
   if(perm === 'unsupported'){
-    btn.innerHTML = '<span class="btn-icon"></span> Not supported'; btn.disabled = true;
+    btn.innerHTML = '<span class="btn-icon">🔕</span> Not supported'; btn.disabled = true;
     badge.textContent = 'N/A'; badge.className = 'notif-status blocked';
   } else if(perm === 'denied'){
-    btn.innerHTML = '<span class="btn-icon"></span> Blocked by browser'; btn.disabled = true;
+    btn.innerHTML = '<span class="btn-icon">🔕</span> Blocked by browser'; btn.disabled = true;
     badge.textContent = 'BLOCKED'; badge.className = 'notif-status blocked';
   } else if(_notifEnabled && perm === 'granted'){
-    btn.innerHTML = '<span class="btn-icon"></span> Disable alerts';
+    btn.innerHTML = '<span class="btn-icon">🔕</span> Disable alerts';
     badge.textContent = 'ON'; badge.className = 'notif-status on';
   } else {
-    btn.innerHTML = '<span class="btn-icon"></span> Enable push alerts';
+    btn.innerHTML = '<span class="btn-icon">🔔</span> Enable push alerts';
     badge.textContent = 'OFF'; badge.className = 'notif-status off';
   }
 }
@@ -2887,10 +2887,10 @@ function _applyBriefingUI(cfg){
   var btn   = document.getElementById('briefingToggleBtn');
   if(_briefingEnabled){
     if(badge){ badge.textContent='ON'; badge.style.background='#22c55e22'; badge.style.color='#16a34a'; }
-    if(btn)  btn.innerHTML='<span class="btn-icon"></span> Disable daily briefing';
+    if(btn)  btn.innerHTML='<span class="btn-icon">📡</span> Disable daily briefing';
   } else {
     if(badge){ badge.textContent='OFF'; badge.style.background='#94a3b822'; badge.style.color='var(--text3)'; }
-    if(btn)  btn.innerHTML='<span class="btn-icon"></span> Enable daily briefing';
+    if(btn)  btn.innerHTML='<span class="btn-icon">📡</span> Enable daily briefing';
   }
   // Telegram fields — token is masked (***) from server; don't overwrite if user has typed one
   var chatIdEl = document.getElementById('briefingTgChatId');
