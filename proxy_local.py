@@ -2876,6 +2876,29 @@ class Handler(BaseHTTPRequestHandler):
             self._cors(); self.end_headers()
             self.wfile.write(body)
 
+        elif path == "/api/cycles":
+            # GET /api/cycles?limit=N — return last N full analysis cycles from SQLite
+            limit = 50
+            try:
+                qs = parse_qs(self.path.split("?",1)[1]) if "?" in self.path else {}
+                limit = int(qs.get("limit",["50"])[0])
+            except Exception:
+                pass
+            rows = []
+            if FEATURE_SQLITE:
+                try:
+                    with _db_lock:
+                        c = _db_conn()
+                        rows = c.execute(
+                            "SELECT fetched_at, full_json FROM cycles ORDER BY id DESC LIMIT ?",
+                            (limit,)
+                        ).fetchall()
+                        c.close()
+                    rows = [{"ts": r["fetched_at"], "full_json": r["full_json"]} for r in rows]
+                except Exception as e:
+                    print(f"  [cycles] DB error: {e}")
+            self._reply(200, json.dumps({"cycles": rows}).encode())
+
         elif path == "/api/digest/redigest":
             # POST-like GET: /api/digest/redigest?id=N  — re-queue a failed/done article
             if FEATURE_SQLITE and "?" in self.path:

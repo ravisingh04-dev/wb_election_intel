@@ -2158,48 +2158,79 @@ function clearMemory(){
 updateMemCount();
 
 /* ═══════ TIMELINE MODAL ═══════ */
-function openTimeline(){
-  var mem=loadMemory();
+function _renderTimeline(cycles){
   var body=document.getElementById('tlBody');
-  document.getElementById('tlEntryCount').textContent=mem.length+' cycle'+(mem.length!==1?'s':'')+' stored';
-  if(!mem.length){ body.innerHTML='<div class="tl-empty">No cycles yet. Run a fetch first.</div>'; }
-  else{
-    body.innerHTML=mem.slice().reverse().map(function(c){
-      var tl=(c.metrics.threatLevel||'LOW').toUpperCase();
-      var dc='tl-dot-'+tl.toLowerCase();
-      var an=c.analysis||{};
-      var risks=(an.keyRisks||[]).filter(Boolean).map(function(r){ return '<span class="risk">▸ '+r+'</span>'; }).join(' ');
-      var acts=(an.observerActions||[]).filter(Boolean).map(function(a){ return '<span class="safe">✓ '+a+'</span>'; }).join(' ');
-      function feedBlock(title,items){
-        if(!items||!items.length) return '';
-        return '<div class="tl-feed-block"><div class="tl-feed-title">'+title+'</div>'+
-          items.slice(0,3).map(function(it){
-            var sc=it.severity==='high'?'color:var(--red)':it.severity==='medium'?'color:var(--amber)':'';
-            var linkHtml=it.url?'<a href="'+it.url+'" target="_blank" style="color:var(--accent);font-size:10px;margin-left:4px">↗</a>':'';
-            return '<div class="tl-feed-item" style="'+sc+'">'+(it.summary||'')+linkHtml+'</div>';
-          }).join('')+'</div>';
-      }
-      return '<div class="tl-entry"><div class="tl-dot '+dc+'"></div>'+
-        '<div class="tl-ts">'+c.ts+'</div>'+
-        '<div class="tl-headline">'+(an.headline||'—')+'</div>'+
-        '<div class="tl-meta">'+
-          '<span class="tl-tag tl-tag-threat-'+tl+'">'+tl+'</span>'+
-          '<span class="tl-tag tl-tag-stat">Signals: '+(c.metrics.totalSignals||0)+'</span>'+
-          '<span class="tl-tag tl-tag-stat">Alerts: '+(c.metrics.highAlerts||0)+'</span>'+
-          '<span class="tl-tag tl-tag-stat">Violence: '+(c.metrics.violenceReports||0)+'</span>'+
-        '</div>'+
-        '<div class="tl-analysis-block">'+
-          '<div style="color:var(--text);margin-bottom:4px">'+(an.bankuraSituation||'—')+'</div>'+
-          (an.partyPositions?'<div style="color:#7c3aed;margin-top:4px">Parties: '+an.partyPositions+'</div>':'')+
-          (risks?'<div style="margin-top:6px">'+risks+'</div>':'')+
-          (acts?'<div style="margin-top:4px">'+acts+'</div>':'')+
-          (an.disinfoAlerts&&an.disinfoAlerts!=='None detected'?'<div style="color:var(--amber);margin-top:4px">⚠️ Disinfo: '+an.disinfoAlerts+'</div>':'')+
-        '</div>'+
-        '<div class="tl-feeds">'+feedBlock('Bankura',c.bankura)+feedBlock('Surrounds',c.surrounds)+feedBlock('Statewide',c.statewide)+feedBlock('Alerts',c.alerts)+'</div>'+
-      '</div>';
-    }).join('');
+  document.getElementById('tlEntryCount').textContent=cycles.length+' cycle'+(cycles.length!==1?'s':'')+' stored';
+  if(!cycles.length){ body.innerHTML='<div class="tl-empty">No cycles yet. Run a fetch first.</div>'; return; }
+  function feedBlock(title,items){
+    if(!items||!items.length) return '';
+    return '<div class="tl-feed-block"><div class="tl-feed-title">'+title+'</div>'+
+      items.slice(0,3).map(function(it){
+        var sc=it.severity==='high'?'color:var(--red)':it.severity==='medium'?'color:var(--amber)':'';
+        var linkHtml=it.url?'<a href="'+it.url+'" target="_blank" style="color:var(--accent);font-size:10px;margin-left:4px">↗</a>':'';
+        return '<div class="tl-feed-item" style="'+sc+'">'+(it.summary||'')+linkHtml+'</div>';
+      }).join('')+'</div>';
   }
+  body.innerHTML=cycles.map(function(c){
+    var tl=(c.metrics.threatLevel||'LOW').toUpperCase();
+    var dc='tl-dot-'+tl.toLowerCase();
+    var an=c.analysis||{};
+    var risks=(an.keyRisks||[]).filter(Boolean).map(function(r){ return '<span class="risk">▸ '+r+'</span>'; }).join(' ');
+    var acts=(an.observerActions||[]).filter(Boolean).map(function(a){ return '<span class="safe">✓ '+a+'</span>'; }).join(' ');
+    return '<div class="tl-entry"><div class="tl-dot '+dc+'"></div>'+
+      '<div class="tl-ts">'+c.ts+'</div>'+
+      '<div class="tl-headline">'+(an.headline||'—')+'</div>'+
+      '<div class="tl-meta">'+
+        '<span class="tl-tag tl-tag-threat-'+tl+'">'+tl+'</span>'+
+        '<span class="tl-tag tl-tag-stat">Signals: '+(c.metrics.totalSignals||0)+'</span>'+
+        '<span class="tl-tag tl-tag-stat">Alerts: '+(c.metrics.highAlerts||0)+'</span>'+
+        '<span class="tl-tag tl-tag-stat">Violence: '+(c.metrics.violenceReports||0)+'</span>'+
+      '</div>'+
+      '<div class="tl-analysis-block">'+
+        '<div style="color:var(--text);margin-bottom:4px">'+(an.bankuraSituation||'—')+'</div>'+
+        (an.partyPositions?'<div style="color:#7c3aed;margin-top:4px">Parties: '+an.partyPositions+'</div>':'')+
+        (risks?'<div style="margin-top:6px">'+risks+'</div>':'')+
+        (acts?'<div style="margin-top:4px">'+acts+'</div>':'')+
+        (an.disinfoAlerts&&an.disinfoAlerts!=='None detected'?'<div style="color:var(--amber);margin-top:4px">⚠️ Disinfo: '+an.disinfoAlerts+'</div>':'')+
+      '</div>'+
+      '<div class="tl-feeds">'+feedBlock('Bankura',c.bankura)+feedBlock('Surrounds',c.surrounds)+feedBlock('Statewide',c.statewide)+feedBlock('Alerts',c.alerts)+'</div>'+
+    '</div>';
+  }).join('');
+}
+
+function openTimeline(){
+  var body=document.getElementById('tlBody');
+  body.innerHTML='<div class="tl-empty">Loading…</div>';
   document.getElementById('tlModal').style.display='flex';
+  // Fetch from SQLite DB (works across all browsers/domains)
+  fetch(window.location.origin+'/api/cycles?limit=50')
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      var dbCycles=(data.cycles||[]).map(function(row){
+        try{
+          var p=JSON.parse(row.full_json||'{}');
+          // Normalise timestamp to display string
+          var ts=row.ts||'';
+          try{
+            var dt=new Date(ts);
+            if(!isNaN(dt)){
+              ts=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+
+                 ' '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false})+' IST';
+            }
+          }catch(e){}
+          return {ts:ts,metrics:p.metrics||{},bankura:p.bankura||[],surrounds:p.surrounds||[],
+                  statewide:p.statewide||[],alerts:p.alerts||[],official:p.official||[],analysis:p.analysis||{}};
+        }catch(e){ return null; }
+      }).filter(Boolean);
+      // Merge with any localStorage cycles not yet in DB (newest first)
+      var localCycles=loadMemory().slice().reverse();
+      var merged=dbCycles.length ? dbCycles : localCycles;
+      _renderTimeline(merged);
+    })
+    .catch(function(){
+      // Fallback to localStorage if proxy unreachable
+      _renderTimeline(loadMemory().slice().reverse());
+    });
 }
 function closeTl(){ document.getElementById('tlModal').style.display='none'; }
 
