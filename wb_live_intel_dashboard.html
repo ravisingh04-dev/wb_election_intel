@@ -423,6 +423,109 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 .fi-footer{display:flex;align-items:center;justify-content:space-between;margin-top:3px}
 .fi-link{font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--accent2);text-decoration:none;padding:1px 6px;border-radius:4px;border:1px solid rgba(59,130,246,0.3);transition:all .12s}
 .fi-link:hover{background:rgba(59,130,246,0.1)}
+
+/* ── MOBILE HAMBURGER (hidden on desktop) ── */
+.mob-hamburger{display:none;align-items:center;justify-content:center;
+  background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);
+  color:#fff;border-radius:6px;padding:5px 10px;font-size:18px;line-height:1;
+  cursor:pointer;flex-shrink:0;font-family:inherit}
+.sidebar-close-bar{display:none}
+.sidebar-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:299;top:48px}
+/* desktop: sidebar always visible in grid */
+
+/* ── MOBILE RESPONSIVE (≤768px) ── */
+@media(max-width:768px){
+  /* Topbar — compact, single line */
+  .topbar{padding:0 10px;gap:8px;height:48px}
+  .logo{display:none}
+  .topbar>.sep{display:none}
+  .hdr-district{font-size:12px}
+  .hdr-sub{display:none}
+  .clock-display{display:none}
+  .mode-badge{display:none}
+  .next-refresh{display:none}
+  .status-label{font-size:10px;max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .hdr-right{gap:6px}
+  .theme-toggle{padding:3px 8px;font-size:11px;gap:3px}
+  .mob-hamburger{display:flex}
+
+  /* Main layout: single column — content takes full width */
+  .main{grid-template-columns:1fr}
+
+  /* Sidebar: slide-in drawer overlay */
+  .sidebar{
+    position:fixed;top:48px;left:0;bottom:0;width:82vw;max-width:300px;z-index:300;
+    transform:translateX(-105%);transition:transform .25s cubic-bezier(.4,0,.2,1);
+    box-shadow:6px 0 24px rgba(0,0,0,0.18);overflow-y:auto;overflow-x:hidden
+  }
+  .sidebar.mob-open{transform:translateX(0)}
+  .sidebar-backdrop{display:none;position:fixed;inset:0;top:48px;
+    background:rgba(0,0,0,0.45);z-index:299}
+  .sidebar-backdrop.mob-open{display:block}
+
+  /* Sidebar close bar */
+  .sidebar-close-bar{display:flex;align-items:center;justify-content:space-between;
+    padding:10px 14px 6px;border-bottom:1px solid var(--border);margin-bottom:4px;flex-shrink:0}
+  .sidebar-close-bar span{font-size:11px;font-weight:600;text-transform:uppercase;
+    letter-spacing:.08em;color:var(--text3);font-family:'JetBrains Mono',monospace}
+  .sidebar-close-btn{background:none;border:1px solid var(--border2);color:var(--text3);
+    border-radius:5px;padding:3px 9px;font-size:14px;cursor:pointer;line-height:1}
+  .sidebar-close-btn:hover{color:var(--text);border-color:var(--accent)}
+
+  /* Content fills full width */
+  .content{padding:10px;gap:12px}
+
+  /* Metrics — 2×2 grid */
+  .metrics-row{grid-template-columns:repeat(2,1fr);gap:8px}
+  .metric-val{font-size:20px}
+
+  /* Feeds — single column */
+  .feeds-grid{grid-template-columns:1fr;gap:10px}
+
+  /* Intel grid — already has @media 960/600 rules, force 1-col below 600 */
+  .intel-grid{gap:10px}
+
+  /* Mid row — stack vertically */
+  .mid-row{flex-direction:column;gap:10px}
+  .wire-panel{height:300px}
+
+  /* Turnout — 3 columns then wrap */
+  .turnout-row{grid-template-columns:repeat(3,1fr);gap:6px}
+  .turnout-pct{font-size:18px}
+
+  /* Charts — single column */
+  .charts-row{grid-template-columns:1fr}
+
+  /* District map — 2 columns */
+  .district-map{grid-template-columns:1fr 1fr}
+
+  /* Figure monitor — 2 columns min */
+  .figure-monitor-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;padding:10px}
+
+  /* Timeline modal feeds — single column */
+  .tl-feeds{grid-template-columns:1fr}
+  .tl-modal{width:96vw;max-height:92vh}
+
+  /* Digest modal */
+  .digest-modal{max-height:92vh}
+  .dm-header{padding:10px 14px}
+  .dm-body{padding:10px 14px}
+
+  /* Trend panel */
+  .trend-chart-wrap{height:90px}
+
+  /* Disclaimer modal */
+}
+
+/* ── VERY SMALL SCREENS (≤420px) ── */
+@media(max-width:420px){
+  .metrics-row{grid-template-columns:1fr 1fr}
+  .turnout-row{grid-template-columns:repeat(2,1fr)}
+  .hdr-district{font-size:11px}
+  .figure-monitor-grid{grid-template-columns:1fr 1fr}
+  .feeds-grid{gap:8px}
+  .content{padding:8px;gap:10px}
+}
 </style>
 </head>
 <body>
@@ -444,8 +547,11 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
     <div class="mode-badge mode-normal" id="modeBadge" onclick="toggleMode()">NORMAL MODE</div>
     <button class="theme-toggle" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle dark/light mode">☀️ Light</button>
     <div class="clock-display" id="clock"></div>
+    <button class="mob-hamburger" onclick="toggleSidebar()" title="Menu" aria-label="Open menu">☰</button>
   </div>
 </div>
+<!-- Mobile sidebar backdrop -->
+<div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeSidebar()"></div>
 
 <!-- DISCLAIMER MODAL -->
 <div id="disclaimerModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;align-items:center;justify-content:center">
@@ -476,7 +582,12 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 <div class="main">
 
   <!-- SIDEBAR -->
-  <div class="sidebar">
+  <div class="sidebar" id="mainSidebar">
+    <!-- Mobile close bar (hidden on desktop) -->
+    <div class="sidebar-close-bar">
+      <span>Menu</span>
+      <button class="sidebar-close-btn" onclick="closeSidebar()">✕</button>
+    </div>
 
     <div class="sidebar-section">
       <div class="sid-label">Controls</div>
@@ -594,6 +705,10 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
           <div style="font-size:9px;color:var(--text3);margin-top:1px">Telegram channel</div>
         </div>
       </div>
+      <!-- DEV ONLY: Send Telegram Updates button -->
+      <button class="ctrl-btn" onclick="sendBriefingNow()" style="margin-top:7px">
+        <span class="btn-icon">📡</span> Send Telegram Updates
+      </button>
       <div id="briefingConfigStatus" style="font-size:10px;color:var(--green2);min-height:14px;margin-top:3px"></div>
     </div>
 
@@ -3084,6 +3199,38 @@ function toggleTheme(){
   _applyTheme(next);
   try{ localStorage.setItem(THEME_KEY, next ? 'dark' : 'light'); }catch(e){}
 }
+
+// ── MOBILE SIDEBAR ────────────────────────────────────────────────────────────
+function toggleSidebar(){
+  var s = document.getElementById('mainSidebar');
+  var bd = document.getElementById('sidebarBackdrop');
+  if(!s) return;
+  var isOpen = s.classList.contains('mob-open');
+  if(isOpen){ closeSidebar(); } else { openSidebar(); }
+}
+function openSidebar(){
+  var s = document.getElementById('mainSidebar');
+  var bd = document.getElementById('sidebarBackdrop');
+  if(s){ s.classList.add('mob-open'); }
+  if(bd){ bd.classList.add('mob-open'); document.body.style.overflow='hidden'; }
+}
+function closeSidebar(){
+  var s = document.getElementById('mainSidebar');
+  var bd = document.getElementById('sidebarBackdrop');
+  if(s){ s.classList.remove('mob-open'); }
+  if(bd){ bd.classList.remove('mob-open'); document.body.style.overflow=''; }
+}
+// Close sidebar when any ctrl-btn inside it is clicked on mobile
+document.addEventListener('DOMContentLoaded', function(){
+  var sidebar = document.getElementById('mainSidebar');
+  if(!sidebar) return;
+  var btns = sidebar.querySelectorAll('.ctrl-btn, .topic-chip, .tl-btn');
+  btns.forEach(function(btn){
+    btn.addEventListener('click', function(){
+      if(window.innerWidth <= 768){ closeSidebar(); }
+    });
+  });
+});
 
 // Apply saved theme immediately on load (before first paint)
 (function(){
