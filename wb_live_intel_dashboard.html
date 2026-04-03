@@ -3554,9 +3554,7 @@ function loadDigests(){
   var stats = document.getElementById('dmStats');
   if(body) body.innerHTML = '<div class="dm-empty">Loading…</div>';
 
-  var endpoint = (window.location.protocol === 'http:')
-    ? window.location.origin + '/api/digests'
-    : 'http://localhost:5050/api/digests';
+  var endpoint = window.location.origin + '/api/digests';
 
   fetch(endpoint + '?days='+days+'&sev='+sev)
     .then(function(r){ return r.json(); })
@@ -3637,9 +3635,7 @@ function markAllRead(){
 }
 
 function redigest(id){
-  var endpoint = (window.location.protocol==='http:')
-    ? window.location.origin+'/api/digest/redigest?id='+id
-    : 'http://localhost:5050/api/digest/redigest?id='+id;
+  var endpoint = window.location.origin+'/api/digest/redigest?id='+id;
   fetch(endpoint).then(function(){
     var card = document.getElementById('da-'+id);
     if(card){
@@ -3791,9 +3787,7 @@ setInterval(loadFiguresNews, 15 * 60 * 1000);         // refresh every 15 min
 
 // Poll sidebar counts every 2 min while page is open (catches background digests completing)
 setInterval(function(){
-  var endpoint = (window.location.protocol==='http:')
-    ? window.location.origin+'/api/digests?days=7&status=done'
-    : 'http://localhost:5050/api/digests?days=7&status=done';
+  var endpoint = window.location.origin+'/api/digests?days=7&status=done';
   fetch(endpoint).then(function(r){ return r.json(); }).then(function(data){
     var done  = (data.articles||[]).length;
     var readS = _readIds();
