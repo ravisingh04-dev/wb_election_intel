@@ -1035,7 +1035,7 @@ def call_ollama(payload_dict, base_url, model):
                 "temperature": 0.1,
                 "options":     {"num_predict": num_predict, "num_ctx": 4096,
                                "temperature": 0.1},
-                "think":       False,   # disable chain-of-thought for qwen3.x (saves 60% tokens)
+                "think":       False,   # disable chain-of-thought if supported (qwen3.x); ignored by other models
             }).encode()
             req = urllib.request.Request(
                 endpoint, data=body, method="POST",
@@ -2911,7 +2911,7 @@ class Handler(BaseHTTPRequestHandler):
         Chunked-transfer response with 10-second keepalive newlines.
 
         Solves Safari's ~90-second idle-TCP timeout on localhost:
-        while the LLM (especially large models like qwen3.5:9b) is thinking,
+        while the LLM is generating (qwen2.5:7b typically ~60-90s),
         this method sends a tiny whitespace chunk every 10 seconds so Safari
         sees data flowing and keeps the connection open.
 
@@ -2950,12 +2950,21 @@ class Handler(BaseHTTPRequestHandler):
                 send_chunk(b"\n")
 
             if error_box[0]:
-                raise error_box[0]
+                # Headers already sent — can't change status code.
+                # Send the error as a valid JSON body chunk so the browser
+                # receives a complete, parseable response.
+                err_msg = str(error_box[0])
+                print(f"  compute error (sending as JSON error body): {err_msg}")
+                err_body = json.dumps({
+                    "error": {"type": "compute_error", "message": err_msg}
+                }).encode()
+                send_chunk(err_body)
+            else:
+                # Send the real JSON body
+                body = json.dumps(result_box[0]).encode()
+                send_chunk(body)
 
-            # Send the real JSON body
-            body = json.dumps(result_box[0]).encode()
-            send_chunk(body)
-            # Chunked-encoding terminator
+            # Chunked-encoding terminator (always send — client needs this)
             self.wfile.write(b"0\r\n\r\n")
             self.wfile.flush()
 

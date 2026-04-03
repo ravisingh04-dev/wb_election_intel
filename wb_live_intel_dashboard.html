@@ -562,58 +562,20 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
       <div id="turnoutManualStatus" style="font-size:10px;color:var(--green2);margin-top:4px;min-height:14px"></div>
     </div>
 
-    <!-- DAILY BRIEFING (Phase 4B) -->
+    <!-- TELEGRAM UPDATES -->
     <div class="sidebar-section" id="briefingSection">
-      <div class="sid-label">Daily briefing
-        <span id="briefingStatusBadge" style="font-size:9px;font-weight:700;letter-spacing:.06em;padding:1px 6px;border-radius:4px;margin-left:6px;background:#94a3b822;color:var(--text3)">OFF</span>
-      </div>
-      <button class="ctrl-btn" id="briefingToggleBtn" onclick="toggleBriefing()">
-        <span class="btn-icon">📡</span> Enable daily briefing
-      </button>
-      <button class="ctrl-btn" onclick="sendBriefingNow()" style="margin-top:4px">
-        <span class="btn-icon">▶</span> Send now (test)
-      </button>
-
-      <!-- Telegram token/chat-id configured in telegram_config.json (read by proxy on startup) -->
-
-      <div style="margin-top:6px;display:flex;gap:5px;align-items:center">
-        <div style="font-size:10px;color:var(--text3);white-space:nowrap">Daily at</div>
-        <input type="time" id="briefingScheduleTime" value="08:00"
-          style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 6px;font-size:11px">
-        <div style="font-size:9px;color:var(--text3)">IST</div>
-      </div>
-
-      <div style="margin-top:6px;display:flex;gap:10px">
-        <label style="font-size:10px;color:var(--text2);display:flex;align-items:center;gap:4px;cursor:pointer">
-          <input type="checkbox" id="briefingEscHigh" checked> HIGH
-        </label>
-        <label style="font-size:10px;color:var(--text2);display:flex;align-items:center;gap:4px;cursor:pointer">
-          <input type="checkbox" id="briefingEscCritical" checked> CRITICAL
-        </label>
-        <div style="font-size:9px;color:var(--text3);margin-left:2px">escalate</div>
-      </div>
-
-      <!-- Fast2SMS removed — not in use -->
-
-      <button class="ctrl-btn" onclick="saveBriefingConfig()" style="margin-top:6px;font-size:11px;padding:6px 10px">
-        <span class="btn-icon">✓</span> Save settings
+      <div class="sid-label">Telegram</div>
+      <button class="ctrl-btn" onclick="sendBriefingNow()">
+        <span class="btn-icon">📡</span> Send Telegram Updates
       </button>
       <div id="briefingConfigStatus" style="font-size:10px;color:var(--green2);min-height:14px;margin-top:3px"></div>
-
-      <div style="margin-top:6px">
-        <div style="font-size:10px;color:var(--text3)">Last sent</div>
-        <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text2)" id="briefingLastSent">Never</div>
-      </div>
-      <button class="ctrl-btn" onclick="openBriefingHistory()" style="margin-top:4px;font-size:11px;padding:5px 10px">
-        <span class="btn-icon">📜</span> View history
-      </button>
     </div>
 
     <!-- ARTICLE DIGEST -->
     <div class="sidebar-section">
       <div class="sid-label">Article Digest</div>
       <button class="ctrl-btn" onclick="openDigest()">
-        <span class="btn-icon">📚</span> Night reading
+        <span class="btn-icon">📚</span> Night Digest
         <span class="digest-badge" id="digestUnreadBadge">0</span>
       </button>
       <div class="stat-mini">
@@ -626,21 +588,6 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
       </div>
     </div>
 
-    <!-- PUSH ALERT NOTIFICATIONS -->
-    <div class="sidebar-section" id="notifSection">
-      <div class="sid-label">Push alerts <span class="notif-status off" id="notifStatusBadge">OFF</span></div>
-      <button class="ctrl-btn" id="notifToggleBtn" onclick="toggleNotifications()">
-        <span class="btn-icon">🔔</span> Enable push alerts
-      </button>
-      <div class="stat-mini">
-        <div class="stat-mini-val" id="notifFiredCount" style="color:var(--amber)">0</div>
-        <div class="stat-mini-lbl">Critical alerts · this session</div>
-      </div>
-    </div>
-
-    <div class="sidebar-section">
-      <div id="connMode" style="font-size:10px;padding:5px 8px;border-radius:6px;font-family:'JetBrains Mono',monospace"></div>
-    </div>
 
   </div>
 
@@ -2384,23 +2331,6 @@ function generateVideoHTML(){
   alert('Slideshow downloaded!\n\nOpen in browser → use QuickTime or OBS to record.');
 }
 
-/* ─── CONNECTION BANNER ─── */
-(function(){
-  var el=document.getElementById('connMode');
-  if(!el) return;
-  var isFile=location.protocol==='file:';
-  var isLocal=location.hostname==='localhost'||location.hostname==='127.0.0.1';
-  if(isFile){
-    el.style.background='#fee2e2'; el.style.color='#991b1b'; el.style.border='1px solid #fca5a5';
-    el.textContent='⚠ file:// — run proxy_local.py';
-  } else if(isLocal){
-    el.style.background='#d1fae5'; el.style.color='#065f46'; el.style.border='1px solid #6ee7b7';
-    el.textContent='✓ local proxy active';
-  } else {
-    el.style.background='#fee2e2'; el.style.color='#991b1b'; el.style.border='1px solid #fca5a5';
-    el.textContent='⚠ run via localhost only';
-  }
-})();
 
 document.getElementById('progressBar').style.width='0%';
 initCharts();
