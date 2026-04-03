@@ -454,7 +454,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
       <button class="ctrl-btn primary" onclick="runFetch(true)">
         <span class="btn-icon">↻</span> Fetch &amp; Analyse Now
       </button>
-      <button class="ctrl-btn danger" onclick="toggleMode()" id="modeToggleBtn">
+      <button class="ctrl-btn danger" onclick="toggleMode()" id="modeToggleBtn" style="display:none">
         <span class="btn-icon">🚨</span> Switch to Election Day Mode
       </button>
     </div>
@@ -476,13 +476,6 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
       </button>
     </div>
 
-    <div class="sidebar-section">
-      <div class="sid-label">Last run</div>
-      <div class="stat-mini">
-        <div class="stat-mini-val" style="font-size:13px;color:var(--text2)" id="lastRunTime">Never</div>
-        <div class="stat-mini-lbl">Last successful fetch</div>
-      </div>
-    </div>
 
     <div class="sidebar-section">
       <div class="sid-label">Monitor topics</div>
@@ -565,10 +558,15 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
     <!-- TELEGRAM UPDATES -->
     <div class="sidebar-section" id="briefingSection">
       <div class="sid-label">Telegram</div>
-      <button class="ctrl-btn" onclick="sendBriefingNow()">
-        <span class="btn-icon">📡</span> Send Telegram Updates
-      </button>
+      <div style="display:flex;align-items:center;gap:7px;padding:7px 9px;background:var(--bg3);border:1px solid var(--border);border-radius:6px">
+        <span style="font-size:15px">📢</span>
+        <div>
+          <div style="font-size:11px;font-weight:600;color:var(--text)">WB Elections Summary</div>
+          <div style="font-size:9px;color:var(--text3);margin-top:1px">Telegram channel</div>
+        </div>
+      </div>
       <div id="briefingConfigStatus" style="font-size:10px;color:var(--green2);min-height:14px;margin-top:3px"></div>
+
     </div>
 
     <!-- ARTICLE DIGEST -->
@@ -643,7 +641,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
     </div>
 
     <!-- MAP PANEL (Phase 4) -->
-    <div class="map-panel" id="mapPanel">
+    <div class="map-panel" id="mapPanel" style="display:none">
       <div class="map-panel-header" onclick="toggleMapPanel()">
         <span style="font-size:14px">🗺️</span>
         <span class="map-panel-title">Bankura District — Assembly Constituency Map</span>
@@ -1398,7 +1396,7 @@ async function runFetch(manual){
     if(FEATURE_ALERTS)          checkAlerts(parsed);
     if(FEATURE_SENTIMENT_TREND){ saveTrendPoint(ts, parsed); renderTrendChart(); }
 
-    document.getElementById('lastRunTime').textContent = ts;
+    var _lrt = document.getElementById('lastRunTime'); if(_lrt) _lrt.textContent = ts;
     currentParsed = parsed;
     window._lastParsed = parsed;   // map popup needs this
 
@@ -2612,6 +2610,7 @@ function sendBriefingNow(){
     .catch(function(){ if(status){ status.style.color='var(--red2)'; status.textContent='Send failed'; } });
 }
 
+
 function detectTelegramChatId(){
   var tokenEl  = document.getElementById('briefingTgToken');
   var chatIdEl = document.getElementById('briefingTgChatId');
@@ -2709,6 +2708,7 @@ function closeBriefingHistory(){
 
 /* Load briefing config on page load */
 document.addEventListener('DOMContentLoaded', loadBriefingConfig);
+
 
 /* ═══════ PHASE 4 — BANKURA AC MAP OVERLAY ═══════ */
 
