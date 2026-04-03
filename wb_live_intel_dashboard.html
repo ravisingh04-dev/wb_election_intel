@@ -558,10 +558,13 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
   .content{display:flex;flex-direction:column}
   .alert-banner{order:1}
   .metrics-row{order:2}
-  .mid-row{order:3;flex-direction:column;gap:8px}
+  /* dissolve mid-row so children join content flex flow independently */
+  .mid-row{display:contents}
+  .trend-panel{order:3}
   #mobPriorityFeed{order:4}
-  .intel-grid{order:5}
-  .charts-row{order:6}
+  .figure-monitor{order:5}
+  .intel-grid{order:6}
+  .charts-row{order:7}
 
   /* ── Analysis panel: taller on mobile ── */
   .analysis-body{max-height:160px}
@@ -987,7 +990,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
       <div class="figure-monitor" id="figureMonitorPanel">
         <div class="figure-monitor-header">
           <span style="font-size:14px">🕵️</span>
-          <span style="font-size:13px;font-weight:600;flex:1">Political Figures Monitor</span>
+          <span style="font-size:13px;font-weight:600;flex:1">Political Figures Monitor — Bankura</span>
           <span id="figNewBadge" style="display:none"></span>
           <button id="figHideTop" onclick="toggleHiddenFigures()" style="display:none;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3);background:none;border:1px solid var(--border);border-radius:6px;padding:2px 8px;cursor:pointer;white-space:nowrap">▴ hide</button>
           <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)" id="figMonitorMeta">Bankura district — key actors</span>
