@@ -1970,13 +1970,22 @@ function renderTrendChart(){
   var violVals  = arr.map(function(p){ return p.violenceReports||0; });
 
   /* Sparse labels: show only start, mid, and end — everything else blank.
-     This guarantees exactly 2-3 readable dates regardless of how many points. */
-  var sparseLabels = labels.map(function(){ return ''; });
-  var lastIdx = labels.length - 1;
+     Compute dates directly from arr[] (not from `labels` which is already
+     sparse — day-boundary-only — so labels[midIdx] and labels[lastIdx]
+     are often '' causing only the first label to appear). */
+  function _ptLabel(p){
+    if(!p || !p.iso) return p ? (p.ts||'') : '';
+    var d = new Date(p.iso);
+    return multiDay
+      ? d.toLocaleDateString('en-IN',{day:'numeric',month:'short'})
+      : d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true});
+  }
+  var sparseLabels = arr.map(function(){ return ''; });
+  var lastIdx = arr.length - 1;
   var midIdx  = Math.round(lastIdx / 2);
-  sparseLabels[0]       = labels[0];
-  sparseLabels[midIdx]  = labels[midIdx];
-  sparseLabels[lastIdx] = labels[lastIdx];
+  sparseLabels[0]       = _ptLabel(arr[0]);
+  sparseLabels[midIdx]  = _ptLabel(arr[midIdx]);
+  sparseLabels[lastIdx] = _ptLabel(arr[lastIdx]);
 
   /* Pad 3 null slots at the end so the line ends before the right edge */
   var TAIL = 3;
