@@ -735,7 +735,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
       <div class="query-topics" id="topicList">
         <div class="chip-wrap">
           <div class="topic-chip active" onclick="toggleChip(0)">
-            <span>Bankura violence</span><span class="chip-count" id="cnt-0">—</span>
+            <span>Bankura</span><span class="chip-count" id="cnt-0">—</span>
           </div>
           <div class="chip-dropdown" id="chip-drop-0"></div>
         </div>
@@ -818,7 +818,6 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
           <div style="font-size:9px;color:var(--text3);margin-top:1px">Telegram channel</div>
         </div>
       </div>
-      <div id="briefingConfigStatus" style="font-size:10px;color:var(--green2);min-height:14px;margin-top:3px"></div>
     </div>
 
     <!-- ARTICLE DIGEST -->
@@ -1219,7 +1218,7 @@ var FEATURE_SENTIMENT_TREND = true;   // threat/signal trend sparkline above fee
 // Each entry: [keywords_to_match, panels_to_search]
 // panels_to_search: array of keys in parsed object
 var TOPIC_CHIP_CONFIG = [
-  {label:'Bankura violence',    kw:['bankura','violence','clash','attack','bomb'],   panels:['bankura','alerts']},
+  {label:'Bankura',             kw:['bankura','violence','clash','attack','bomb'],   panels:['bankura','alerts']},
   {label:'Bankura / Bishnupur', kw:['bankura','bishnupur'],                          panels:['bankura']},
   {label:'Purulia / Jhargram',  kw:['purulia','jhargram'],                           panels:['surrounds']},
   {label:'Birbhum / Bardhaman', kw:['birbhum','bardhaman'],                          panels:['surrounds']},
@@ -1896,9 +1895,31 @@ function saveTrendPoint(ts, parsed){
   _saveTrend(arr);
 }
 
+/* Recalibrate historical CRITICAL points inflated by old article-count logic.
+   Before 2026-04-03T19:13 UTC, violenceReports counted raw article mentions,
+   so 9 Malda articles → viol=13 → false CRITICAL.
+   After the fix, violenceReports counts distinct (location, violence_type) incidents.
+   Rule: CRITICAL before the cutoff → HIGH; CRITICAL after but viol<5 & high<8 → HIGH. */
+var _TREND_FIX_CUTOFF = '2026-04-03T19:13:00';
+function _recalibrateTrend(arr){
+  var changed = false;
+  var out = arr.map(function(p){
+    if(p.threatLevel !== 'CRITICAL') return p;
+    var preFix = p.iso && p.iso < _TREND_FIX_CUTOFF;
+    var lowCount = (p.violenceReports||0) < 5 && (p.highAlerts||0) < 8;
+    if(preFix || lowCount){
+      changed = true;
+      return Object.assign({}, p, {threatLevel:'HIGH'});
+    }
+    return p;
+  });
+  if(changed) _saveTrend(out);
+  return out;
+}
+
 function renderTrendChart(){
   if(!FEATURE_SENTIMENT_TREND) return;
-  var arr   = _loadTrend();
+  var arr   = _recalibrateTrend(_loadTrend());
   var panel = document.getElementById('trendPanel');
   if(!panel) return;
   if(!arr.length){ panel.style.display='none'; return; }
@@ -2058,7 +2079,8 @@ document.addEventListener('DOMContentLoaded', function(){
         // Merge DB points with any localStorage points newer than the latest DB point
         var dbLatestIso = pts[pts.length - 1].iso || '';
         var localNewer  = _loadTrend().filter(function(p){ return p.iso && p.iso > dbLatestIso; });
-        _saveTrend(pts.concat(localNewer));
+        // Recalibrate before saving: CRITICAL points with <5 incidents were false positives
+        _saveTrend(_recalibrateTrend(pts.concat(localNewer)));
       }
       renderTrendChart();
     })

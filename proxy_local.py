@@ -31,7 +31,7 @@ from urllib.parse import parse_qs, urlparse
 SCRIPT_DIR     = Path(__file__).parent.resolve()
 DASHBOARD_FILE = SCRIPT_DIR / "wb_live_intel_dashboard.html"
 OSINT_FILE     = SCRIPT_DIR / "wb_osint_monitor.html"
-DEFAULT_PORT   = 5055   # dev sandbox — prod runs on 5050
+DEFAULT_PORT   = 5050
 
 # ─── PHASE 2 FEATURE FLAGS ────────────────────────────────────────────────────
 # Set to False to instantly disable without touching any other code.
@@ -654,21 +654,21 @@ _WIRE_WB_KW = [
 RSS_FEEDS = [
     # ── BANKURA LOCAL (4 days — low-volume beat needs wider window) ──────────
     ("bankura", "Google: Bankura election 2026",
-     gnews("Bankura election 2026", when="4d")),
+     gnews("Bankura election 2026", when="2d")),
     ("bankura", "Google: Bankura candidate campaign",
-     gnews("Bankura candidate campaign rally 2026", when="4d")),
-    ("bankura", "Google: Bishnupur election",
-     gnews("Bishnupur election 2026", when="4d")),
+     gnews("Bankura candidate campaign rally 2026", when="2d")),
+    ("bankura", "Google: Bishnupur Bankura election",
+     gnews('"Bishnupur" "West Bengal" election 2026', when="2d")),
     ("bankura", "Google: Bishnupur Barjora Sonamukhi",
-     gnews("Bishnupur OR Barjora OR Sonamukhi election 2026", when="4d")),
+     gnews('"Bishnupur" "West Bengal" OR Barjora OR Sonamukhi election 2026', when="2d")),
     ("bankura", "Google: Saltora Chhatna Taldangra Onda",
-     gnews("Saltora OR Chhatna OR Taldangra OR Onda election 2026", when="4d")),
+     gnews("Saltora OR Chhatna OR Taldangra OR Onda election 2026", when="2d")),
     ("bankura", "Google: Bankura violence MCC",
-     gnews("Bankura election violence OR MCC violation 2026", when="4d")),
-    ("bankura", "Google: Kotulpur Indas Raipur Ranibandh",
-     gnews("Kotulpur OR Indas OR Raipur OR Ranibandh election 2026", when="4d")),
+     gnews("Bankura election violence OR MCC violation 2026", when="2d")),
+    ("bankura", "Google: Kotulpur Indas Ranibandh Raipur Bankura",
+     gnews('Kotulpur OR Indas OR Ranibandh OR "Raipur Bankura" OR "Raipur West Bengal" election 2026', when="2d")),
     ("bankura", "Google: Bankura polling booth security",
-     gnews("Bankura polling booth security paramilitary 2026", when="4d")),
+     gnews("Bankura polling booth security paramilitary 2026", when="2d")),
 
     # ── SURROUNDING DISTRICTS (48h) ───────────────────────────────────────
     ("surrounds", "Google: Purulia election",
@@ -706,17 +706,17 @@ RSS_FEEDS = [
 
     # ── ALERTS (4d — violence/MCC/arms coverage; real incidents are sparse) ──
     ("alerts", "Google: WB election violence booth capture",
-     gnews("West Bengal election violence booth capture 2026", when="4d")),
+     gnews("West Bengal election violence booth capture 2026", when="2d")),
     ("alerts", "Google: West Bengal MCC violation",
-     gnews("West Bengal election MCC violation 2026", when="4d")),
+     gnews("West Bengal election MCC violation 2026", when="2d")),
     ("alerts", "Google: EVM VVPAT complaint Bengal",
-     gnews("EVM VVPAT complaint West Bengal 2026", when="4d")),
+     gnews("EVM VVPAT complaint West Bengal 2026", when="2d")),
     ("alerts", "Google: WB election arrest seized",
-     gnews("West Bengal election arrest seized cash arms 2026", when="4d")),
+     gnews("West Bengal election arrest seized cash arms 2026", when="2d")),
     ("alerts", "Google: Bengal bomb crude bomb election",
-     gnews("Bengal bomb crude election 2026", when="4d")),
+     gnews("Bengal bomb crude election 2026", when="2d")),
     ("alerts", "Google: Malda Murshidabad violence Bengal",
-     gnews("Malda OR Murshidabad election violence arrest 2026", when="4d")),
+     gnews("Malda OR Murshidabad election violence arrest 2026", when="2d")),
 
     # ── OFFICIAL (48h) ────────────────────────────────────────────────────
     ("official", "Google: ECI West Bengal order",
@@ -1360,31 +1360,50 @@ def _topic_counts(panel_items):
         hits(oi,    ["paramilitary","crpf","bsf","cisf","deployment"]),
     ]
 
+# Location keywords used for incident-level violence deduplication.
+# When 9 sources all report "Malda violence", they share loc="malda" + vkw="violence"
+# → fingerprint "malda__violence" → counted as 1 incident, not 9.
+_INCIDENT_LOC_KW = [
+    "bankura", "bishnupur", "barjora", "sonamukhi", "kotulpur", "indas",
+    "saltora", "chhatna", "taldangra", "onda", "ranibandh", "raipur",
+    "malda", "birbhum", "bardhaman", "medinipur", "murshidabad",
+    "howrah", "kolkata", "purulia", "jhargram", "cooch behar",
+    "nadia", "raghunathganj", "purulia", "kharagpur",
+]
+
+def _count_violence_incidents(items, violence_kws, loc_kws):
+    """Count unique (location, violence_type) incident pairs — not article count.
+    All articles about 'Malda violence' → fingerprint 'malda__violence' → 1 incident."""
+    incidents = set()
+    unlocated = 0
+    for it in items:
+        text = (it.get("title", "") + " " + it.get("desc", "") + " " + it.get("summary_hint", "")).lower()
+        v_matched = [k for k in violence_kws if k in text]
+        if not v_matched:
+            continue
+        locs = [kw for kw in loc_kws if kw in text]
+        if locs:
+            incidents.add(f"{sorted(locs)[0]}__{v_matched[0]}")
+        else:
+            unlocated += 1
+    return len(incidents) + min(unlocated, 2)
+
 def _threat_level(violence_count, mcc_count, high_items, total_dedup=0):
     """
-    Compute threat level from WB-filtered, deduplicated article signals.
+    Compute threat level using INCIDENT-COUNT thresholds.
 
-    Uses RATE-based thresholds (violence as % of deduplicated signals) so that
-    a single widely-covered incident (e.g. Malda) doesn't inflate the count
-    just because many outlets report it with slightly different headlines.
-
-    Also uses absolute minimums to catch real multi-incident scenarios even
-    when total signal count is low.
+    violence_count is now the number of UNIQUE (location, violence_type) incidents
+    — not article count — so a single event covered by 9 sources counts as 1.
 
     Scale:
-      CRITICAL  — widespread active violence across multiple distinct incidents
-      HIGH      — confirmed violence (2+ deduplicated incidents)
-      MODERATE  — single violence report OR notable MCC/EVM incidents
+      CRITICAL  — 5+ distinct violence incidents OR 8+ high-severity LLM items
+      HIGH      — 2-4 distinct violence incidents OR 4+ high-severity LLM items
+      MODERATE  — 1 violence incident OR 3+ MCC incidents OR 2+ high-severity
       LOW       — routine pre-election activity, no confirmed violence
     """
-    # Avoid division by zero; minimum denominator of 20
-    denom = max(total_dedup, 20)
-    v_rate = violence_count / denom   # violence article rate
-
-    # Rate thresholds calibrated for ~100-200 deduplicated signals
-    if v_rate >= 0.10 or high_items >= 8:    # 10%+ = widespread violence coverage
+    if violence_count >= 5 or high_items >= 8:
         return "CRITICAL"
-    if v_rate >= 0.04 or high_items >= 4:    # 4-9% = confirmed incident(s)
+    if violence_count >= 2 or high_items >= 4:
         return "HIGH"
     if violence_count >= 1 or mcc_count >= 3 or high_items >= 2:
         return "MODERATE"
@@ -1453,8 +1472,9 @@ def inject_news_into_payload(payload_dict):
         "medinipur", "howrah", "hooghly", "kolkata", "calcutta",
         "murshidabad", "malda", "nadia", "cooch behar", "darjeeling", "jalpaiguri",
         "north 24", "south 24", "24 pargana",
-        "bishnupur", "saltora", "chhatna", "ranibandh", "taldangra", "barjora",
-        "onda", "kotulpur", "sonamukhi", "indas", "raipur",
+        "bishnupur bankura", "bishnupur west bengal",
+        "saltora", "chhatna", "ranibandh", "taldangra", "barjora",
+        "onda", "kotulpur", "sonamukhi", "indas", "raipur bankura", "raipur west bengal",
         "mamata", "trinamool", "tmc", "wb election", "wb 2026",
         "ceo west bengal", "bengal election",
     ]
@@ -1465,6 +1485,7 @@ def inject_news_into_payload(payload_dict):
         "donald trump", "white house", "congress us", "senate", "pentagon",
         "stock market", "sensex", "nifty", "rupee", "rbi rate", "gdp",
         "ipl ", "cricket", "bollywood", "oscar", "grammy",
+        "chhattisgarh", "chattisgarh", "manipur", "churachandpur", "imphal",
     ]
     def _is_wb_relevant(item):
         text = (item.get("title", "") + " " + item.get("desc", "")).lower()
@@ -1559,8 +1580,12 @@ def inject_news_into_payload(payload_dict):
 
     # Deduplicate wb_raw by title fingerprint before counting violence/MCC.
     # The same incident (e.g. "Malda violence") is reported by many sources —
-    # without dedup, 10 articles about one incident = 10 violence hits = false CRITICAL.
-    # Fingerprint: first 40 alphanumeric chars of lowercased title.
+    # Incident-level violence deduplication:
+    # Title-based fingerprint fails when 9 sources each write a different headline
+    # for the same physical event (e.g., Malda violence). Instead, fingerprint on
+    # (location_keyword + violence_keyword) pair: all "Malda violence" articles
+    # share loc="malda", vkw="violence" → fingerprint "malda__violence" → 1 incident.
+    # MCC and high_items still use full deduplicated list for accuracy.
     _seen_fps = set()
     wb_raw_dedup = []
     for _it in wb_raw:
@@ -1569,7 +1594,7 @@ def inject_news_into_payload(payload_dict):
             _seen_fps.add(_fp)
             wb_raw_dedup.append(_it)
 
-    violence_count = kw_count(wb_raw_dedup, violence_keywords)
+    violence_count = _count_violence_incidents(wb_raw, violence_keywords, _INCIDENT_LOC_KW)
     mcc_count      = kw_count(wb_raw_dedup, mcc_keywords)
     high_items     = sum(1 for it in all_panels if it["severity"] == "high")
     threat_level   = _threat_level(violence_count, mcc_count, high_items, len(wb_raw_dedup))
@@ -1936,6 +1961,7 @@ def _format_brief_telegram(parsed, trigger, ts):
         "scheduled":  "[Scheduled]",
         "escalation": "[ESCALATION ALERT]",
         "manual":     "[Manual test]",
+        "shared":     "[Shared Update]",
     }.get(trigger, "[Brief]")
 
     PANEL_LABELS = {
@@ -3063,13 +3089,27 @@ class Handler(BaseHTTPRequestHandler):
                     for row in reversed(rows):   # oldest first
                         try:
                             m = json.loads(row["full_json"] or "{}").get("metrics", {})
+                            tl             = (m.get("threatLevel") or "LOW").upper()
+                            v_reports      = m.get("violenceReports") or 0
+                            high_alerts    = m.get("highAlerts")      or 0
+                            # Recalibrate historical CRITICAL points that were inflated by the
+                            # old article-count logic (pre-fix, before 2026-04-03T19:13 UTC).
+                            # Before the fix, violenceReports counted raw article occurrences,
+                            # so 9 Malda articles → viol=9-13 → false CRITICAL.
+                            # After the fix, violenceReports counts distinct (location,type) incidents.
+                            # Rule: any CRITICAL cycle stored before the cutoff → remap to HIGH.
+                            FIX_CUTOFF = "2026-04-03T19:13:00"
+                            iso_ts = row["fetched_at"] or ""
+                            pre_fix = iso_ts < FIX_CUTOFF if iso_ts else False
+                            if tl == "CRITICAL" and (pre_fix or (v_reports < 5 and high_alerts < 8)):
+                                tl = "HIGH"
                             points.append({
                                 "iso":             row["fetched_at"],
                                 "ts":              row["fetched_at"],
-                                "threatLevel":     (m.get("threatLevel") or "LOW").upper(),
-                                "totalSignals":    m.get("totalSignals")    or 0,
-                                "highAlerts":      m.get("highAlerts")      or 0,
-                                "violenceReports": m.get("violenceReports") or 0,
+                                "threatLevel":     tl,
+                                "totalSignals":    m.get("totalSignals") or 0,
+                                "highAlerts":      high_alerts,
+                                "violenceReports": v_reports,
                             })
                         except Exception:
                             pass
