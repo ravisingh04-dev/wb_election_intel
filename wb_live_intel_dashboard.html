@@ -1925,6 +1925,20 @@ function renderTrendChart(){
   if(!arr.length){ panel.style.display='none'; return; }
   panel.style.display = '';
 
+  /* On mobile: subsample to at most 48 evenly-spaced points so the X axis
+     doesn't cramp with a dense span of March→April date labels.
+     48 pts ≈ 12 h of 15-min cycles — enough to show meaningful trend shape. */
+  var isMob = window.innerWidth <= 768;
+  var MOB_TREND_MAX = 48;
+  if(isMob && arr.length > MOB_TREND_MAX){
+    var step = Math.ceil(arr.length / MOB_TREND_MAX);
+    var thinned = [];
+    for(var _i = 0; _i < arr.length; _i += step) thinned.push(arr[_i]);
+    // Always keep the very last point so the live dot is current
+    if(thinned[thinned.length-1] !== arr[arr.length-1]) thinned.push(arr[arr.length-1]);
+    arr = thinned;
+  }
+
   var meta = document.getElementById('trendMeta');
   if(meta) meta.textContent = arr.length+' cycle'+(arr.length!==1?'s':'')+' stored';
 
@@ -1989,8 +2003,8 @@ function renderTrendChart(){
   if(_trendChart){ _trendChart.destroy(); _trendChart = null; }
 
   var xTickCfg = multiDay
-    ? { autoSkip:false, font:{size:9}, color:'#64748b', maxRotation:0 }
-    : { maxTicksLimit:10, font:{size:9}, color:'#64748b', maxRotation:0 };
+    ? { autoSkip:true, maxTicksLimit:(isMob ? 4 : 8), font:{size:9}, color:'#64748b', maxRotation:0 }
+    : { maxTicksLimit:(isMob ? 4 : 10), font:{size:9}, color:'#64748b', maxRotation:0 };
 
   _trendChart = new Chart(canvas, {
     type: 'line',
