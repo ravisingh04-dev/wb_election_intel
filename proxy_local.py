@@ -1360,25 +1360,31 @@ def _topic_counts(panel_items):
         hits(oi,    ["paramilitary","crpf","bsf","cisf","deployment"]),
     ]
 
-def _threat_level(violence_count, mcc_count, high_items):
+def _threat_level(violence_count, mcc_count, high_items, total_dedup=0):
     """
-    Compute threat level from WB-filtered article signals.
+    Compute threat level from WB-filtered, deduplicated article signals.
 
-    Thresholds raised vs previous version because:
-    - violence_keywords now covers ONLY physical incidents (not 'clash/arrested')
-    - high_items comes from a tighter _score_severity() that no longer marks
-      analysis pieces or non-WB arrests as HIGH
-    - Input is WB-geo-filtered so national noise is excluded
+    Uses RATE-based thresholds (violence as % of deduplicated signals) so that
+    a single widely-covered incident (e.g. Malda) doesn't inflate the count
+    just because many outlets report it with slightly different headlines.
+
+    Also uses absolute minimums to catch real multi-incident scenarios even
+    when total signal count is low.
 
     Scale:
-      CRITICAL  — multiple confirmed violent incidents; serious pre-poll breakdown
-      HIGH      — confirmed violence or several high-severity MCC/EVM incidents
-      MODERATE  — single violence report OR several MCC/liquor/cash seizure reports
+      CRITICAL  — widespread active violence across multiple distinct incidents
+      HIGH      — confirmed violence (2+ deduplicated incidents)
+      MODERATE  — single violence report OR notable MCC/EVM incidents
       LOW       — routine pre-election activity, no confirmed violence
     """
-    if violence_count >= 4 or high_items >= 7:
+    # Avoid division by zero; minimum denominator of 20
+    denom = max(total_dedup, 20)
+    v_rate = violence_count / denom   # violence article rate
+
+    # Rate thresholds calibrated for ~100-200 deduplicated signals
+    if v_rate >= 0.10 or high_items >= 8:    # 10%+ = widespread violence coverage
         return "CRITICAL"
-    if violence_count >= 2 or high_items >= 4:
+    if v_rate >= 0.04 or high_items >= 4:    # 4-9% = confirmed incident(s)
         return "HIGH"
     if violence_count >= 1 or mcc_count >= 3 or high_items >= 2:
         return "MODERATE"
@@ -1566,7 +1572,7 @@ def inject_news_into_payload(payload_dict):
     violence_count = kw_count(wb_raw_dedup, violence_keywords)
     mcc_count      = kw_count(wb_raw_dedup, mcc_keywords)
     high_items     = sum(1 for it in all_panels if it["severity"] == "high")
-    threat_level   = _threat_level(violence_count, mcc_count, high_items)
+    threat_level   = _threat_level(violence_count, mcc_count, high_items, len(wb_raw_dedup))
     topic_counts   = _topic_counts(panel_items)
 
     print(f"  Signals (WB-filtered): {count_wb} (raw fetched: {count}) | Violence hits: {violence_count} | MCC hits: {mcc_count} | Threat: {threat_level}")
