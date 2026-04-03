@@ -424,6 +424,32 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 .fi-link{font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--accent2);text-decoration:none;padding:1px 6px;border-radius:4px;border:1px solid rgba(59,130,246,0.3);transition:all .12s}
 .fi-link:hover{background:rgba(59,130,246,0.1)}
 
+/* ── MOBILE TICKER STRIP ── */
+#mobTickerStrip{display:none;align-items:center;background:var(--bg2);border-bottom:1px solid var(--border);overflow:hidden;height:28px;flex-shrink:0}
+#mobTickerStrip .mtk-label{font-size:9px;font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--red2);padding:0 8px;flex-shrink:0;letter-spacing:.04em;border-right:1px solid var(--border)}
+#mobTickerStrip .mtk-track{overflow:hidden;flex:1;height:28px;display:flex;align-items:center}
+#mobTickerStrip .mtk-inner{display:flex;gap:28px;white-space:nowrap;font-size:11px;color:var(--text2);animation:mtkScroll 60s linear infinite}
+#mobTickerStrip .mtk-inner a{color:var(--text2);text-decoration:none}
+#mobTickerStrip .mtk-inner a:hover{color:var(--accent)}
+#mobTickerStrip .mtk-sep{color:var(--border2);flex-shrink:0}
+@keyframes mtkScroll{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+
+/* ── MOBILE PRIORITY FEED ── */
+#mobPriorityFeed{display:none;background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+#mobPriorityFeed .mpf-header{padding:8px 12px;border-bottom:1px solid var(--border);background:var(--bg3);display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600}
+#mobPriorityFeed .mpf-item{padding:7px 10px 7px 0;border-bottom:1px solid var(--border);display:flex;gap:7px;align-items:flex-start}
+#mobPriorityFeed .mpf-item:last-child{border-bottom:none}
+#mobPriorityFeed .mpf-dot{font-size:11px;flex-shrink:0;margin-top:1px;padding-left:10px}
+#mobPriorityFeed .mpf-body{flex:1;min-width:0}
+#mobPriorityFeed .mpf-meta{display:flex;align-items:center;gap:4px;margin-bottom:2px;flex-wrap:wrap}
+#mobPriorityFeed .mpf-panel{font-size:9px;font-family:'JetBrains Mono',monospace;background:var(--bg4);padding:1px 5px;border-radius:3px;color:var(--text3)}
+#mobPriorityFeed .mpf-src{font-size:9px;font-family:'JetBrains Mono',monospace;color:var(--accent2)}
+#mobPriorityFeed .mpf-time{font-size:9px;font-family:'JetBrains Mono',monospace;color:var(--text3);margin-left:auto}
+#mobPriorityFeed .mpf-text{font-size:11.5px;color:var(--text);line-height:1.4}
+#mobPriorityFeed .mpf-text a{color:inherit;text-decoration:none}
+#mobPriorityFeed .mpf-text a:hover{color:var(--accent)}
+#mobPriorityFeed .mpf-empty{padding:20px;text-align:center;color:var(--text3);font-size:12px}
+
 /* ── MOBILE ANALYSIS EXPAND (hidden on desktop) ── */
 .mob-analysis-expand{display:none;width:100%;padding:4px;font-size:11px;
   font-family:'JetBrains Mono',monospace;color:var(--accent2);cursor:pointer;
@@ -509,16 +535,31 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
     background:linear-gradient(transparent,var(--bg2));pointer-events:none}
   .mob-analysis-expand{display:flex !important}
 
-  /* ── Wire: compact, 3-item visible height, rest ticks ── */
-  .mid-row{flex-direction:column;gap:8px}
-  .wire-panel{height:190px}
-  .wire-item{padding:5px 8px}
-  .wire-item-title{font-size:10.5px}
+  /* ── Wire: hidden on mobile (content flows into priority feed) ── */
+  .wire-panel{display:none !important}
 
-  /* ── Trend panel: tight fit ── */
-  .trend-chart-wrap{height:75px;padding:6px 10px 2px}
+  /* ── Priority feed + ticker: show on mobile ── */
+  #mobPriorityFeed{display:block}
+  #mobTickerStrip{display:flex;position:sticky;top:48px;z-index:150;margin:0 -8px}
+
+  /* ── Desktop feeds-grid: hide on mobile ── */
+  .feeds-grid{display:none !important}
+
+  /* ── Layout order (content is flex-direction:column) ── */
+  .content{display:flex;flex-direction:column}
+  #mobTickerStrip{order:0}
+  .alert-banner{order:1}
+  .metrics-row{order:2}
+  #mobPriorityFeed{order:3}
+  .mid-row{order:4;flex-direction:column;gap:8px}
+  .intel-grid{order:5}
+  .charts-row{order:6}
+
+  /* Trend panel: tight fit — no empty space */
+  .trend-panel{overflow:hidden}
+  .trend-chart-wrap{height:70px;padding:4px 8px 2px}
   .trend-legend{display:none}
-  .trend-header{padding:7px 10px;font-size:12px}
+  .trend-header{padding:6px 10px;font-size:12px}
 
   /* ── Turnout ── */
   .turnout-row{grid-template-columns:repeat(3,1fr);gap:5px}
@@ -766,6 +807,24 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
   <!-- MAIN CONTENT -->
   <div class="content" id="mainContent">
+
+    <!-- MOBILE: sticky horizontal ticker strip (shown on mobile only) -->
+    <div id="mobTickerStrip">
+      <div class="mtk-label">LIVE</div>
+      <div class="mtk-track">
+        <div class="mtk-inner" id="mobTickerInner">Loading feeds…</div>
+      </div>
+    </div>
+
+    <!-- MOBILE: unified priority feed (shown on mobile only, replaces feeds-grid) -->
+    <div id="mobPriorityFeed">
+      <div class="mpf-header">
+        <span>🚨</span>
+        <span style="flex:1">Priority Feed</span>
+        <span id="mobFeedCount" style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)"></span>
+      </div>
+      <div id="mobPriorityFeedBody"><div class="mpf-empty">Awaiting fetch cycle…</div></div>
+    </div>
 
     <div class="alert-banner" id="alertBanner">
       <span class="alert-icon">⚠</span>
@@ -1526,7 +1585,10 @@ function _renderParsed(parsed, ts){
   }
   updateCharts(m, parsed.topicCounts);
   updateDistrictMap(an);
-  updateTicker((parsed.alerts||[]).concat(parsed.bankura||[]));
+  var tickerItems = (parsed.alerts||[]).concat(parsed.bankura||[]);
+  updateTicker(tickerItems);
+  updateMobTicker(tickerItems);
+  buildMobileFeed(parsed);
   renderFigureMonitor(parsed.figureMentions);
   setTimeout(loadFiguresNews, 100);
   showContextImages(tl);
@@ -3234,6 +3296,83 @@ function toggleTheme(){
   var next   = !isDark;
   _applyTheme(next);
   try{ localStorage.setItem(THEME_KEY, next ? 'dark' : 'light'); }catch(e){}
+}
+
+// ── MOBILE PRIORITY FEED ─────────────────────────────────────────────────────
+var MOB_FEED_LIMIT = 10; // configurable — max items shown in mobile priority feed
+
+function buildMobileFeed(parsed){
+  var el = document.getElementById('mobPriorityFeedBody');
+  var countEl = document.getElementById('mobFeedCount');
+  if(!el) return;
+  var panels = {
+    'ALERTS':  parsed.alerts   || [],
+    'BANKURA': parsed.bankura  || [],
+    'SURR':    parsed.surrounds|| [],
+    'WB':      parsed.statewide|| [],
+    'OFFIC':   parsed.official || [],
+    'PARTIES': parsed.parties  || [],
+    'BANGLA':  parsed.bangla   || [],
+  };
+  var all = [];
+  Object.keys(panels).forEach(function(label){
+    (panels[label]).forEach(function(it){
+      all.push({src:it.source||'', summary:it.summary||it.text||'',
+                severity:it.severity||'low', time:it.time||'', url:it.url||'', _panel:label});
+    });
+  });
+  var sevOrd = {high:0, medium:1, med:1, low:2};
+  all.sort(function(a,b){ return (sevOrd[a.severity]||2)-(sevOrd[b.severity]||2); });
+  var total = all.length;
+  all = all.slice(0, MOB_FEED_LIMIT);
+  if(countEl) countEl.textContent = all.length+'/'+total;
+  if(!all.length){
+    el.innerHTML='<div class="mpf-empty">No items yet — run a fetch cycle</div>'; return;
+  }
+  el.innerHTML = all.map(function(it){
+    var sev = it.severity||'low';
+    var dot = sev==='high'?'🔴':(sev==='medium'||sev==='med')?'🟡':'🟢';
+    var borderColor = sev==='high'?'var(--red)':(sev==='medium'||sev==='med')?'var(--amber)':'var(--green)';
+    var sc=(function(s){
+      s=s.toLowerCase();
+      return s.includes('bjp')?'#f97316':s.includes('tmc')||s.includes('trinamool')?'#16a34a':
+             s.includes('ani')?'#7c3aed':s.includes('pti')?'#22c55e':'var(--accent)';
+    })(it.src);
+    var srcShort = it.src.substring(0,16);
+    var txt = it.url
+      ? '<a href="'+it.url+'" target="_blank" rel="noopener">'+it.summary+'</a>'
+      : it.summary;
+    return '<div class="mpf-item" style="border-left:3px solid '+borderColor+'">'+
+      '<div class="mpf-dot">'+dot+'</div>'+
+      '<div class="mpf-body">'+
+        '<div class="mpf-meta">'+
+          '<span class="mpf-panel">'+it._panel+'</span>'+
+          '<span class="mpf-src" style="color:'+sc+'">'+srcShort+'</span>'+
+          '<span class="mpf-time">'+it.time+'</span>'+
+        '</div>'+
+        '<div class="mpf-text">'+txt+'</div>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+}
+
+function updateMobTicker(items){
+  var inner = document.getElementById('mobTickerInner');
+  if(!inner || !items || !items.length) return;
+  // Duplicate array for seamless loop
+  var all = items.concat(items);
+  inner.innerHTML = all.map(function(it){
+    var txt = (it.summary||it.text||'').substring(0, 90);
+    var url = it.url||'';
+    var item = url
+      ? '<a href="'+url+'" target="_blank" rel="noopener">'+txt+'</a>'
+      : '<span>'+txt+'</span>';
+    return item + '<span class="mtk-sep"> ◆ </span>';
+  }).join('');
+  // Adjust animation speed based on total content length
+  var totalChars = items.reduce(function(n,it){ return n+(it.summary||'').length; }, 0);
+  var dur = Math.max(30, Math.min(120, totalChars * 0.15));
+  inner.style.animationDuration = dur + 's';
 }
 
 // ── MOBILE ANALYSIS EXPAND ───────────────────────────────────────────────────
