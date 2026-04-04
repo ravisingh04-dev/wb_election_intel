@@ -1,232 +1,185 @@
-# WB Election Intel — Bankura 2026
-## Election Observer Intelligence Dashboard
+# WB Election Intel
 
-A self-contained, offline-capable OSINT and intelligence dashboard for election
-observers in Bankura district, West Bengal. Phase 1: **23 April 2026**.
-Results: **4 May 2026**.
+**Real-time election intelligence dashboard for field observers — West Bengal Assembly Elections 2026**
 
----
-
-## What's in this folder
-
-```
-wb_election_intel/
-│
-├── wb_live_intel_dashboard.html   ← Main intelligence dashboard (Claude-powered)
-├── wb_osint_monitor.html          ← OSINT source directory (manual monitoring)
-│
-├── proxy.py                       ← Local server (needed for browser API calls)
-│
-├── start_mac.command              ← Mac launcher — double-click in Finder
-├── start.sh                       ← Mac/Linux launcher — run in Terminal
-├── start.bat                      ← Windows launcher — double-click
-├── start_android.sh               ← Android/Termux launcher
-│
-├── README.md                      ← This file
-└── .api_key                       ← Your API key (auto-created, keep private)
-```
+A self-hosted, local-first OSINT platform that continuously monitors multi-source news, runs local LLM analysis, and delivers a structured intelligence picture to field observers on any device — including mobile — via a secure public URL. No cloud AI, no subscriptions, no data leaving your machine except through a Cloudflare tunnel you control.
 
 ---
 
-## Quick start by platform
+## What it does
 
-### Mac (easiest)
-1. Right-click `start_mac.command` → **Open** (first time only, to bypass Gatekeeper)
-2. After that, just **double-click** it any time
-3. Your browser opens automatically at `http://localhost:5050`
-4. Paste your API key when prompted (saved for future runs)
+Every 15 minutes, the system:
 
-### Windows
-1. **Double-click** `start.bat`
-2. Paste your API key when prompted
-3. Browser opens at `http://localhost:5050`
+1. Fetches 30+ Google News RSS feeds across 7 thematic panels (Bankura district, surrounding districts, statewide WB, alerts & MCC violations, official ECI updates, party statements, Bengali-language media)
+2. Geo-filters and deduplicates articles — stripping non-WB content, removing the same incident reported by multiple sources
+3. Runs the filtered headlines through a locally hosted LLM (`qwen2.5:7b` via Ollama) to produce a structured JSON intelligence assessment
+4. Persists the cycle to a local SQLite database
+5. Serves the latest assessment to all connected clients — browser, mobile, or any HTTP client — via a Cloudflare tunnel
 
-### Mac / Linux (Terminal)
-```bash
-cd wb_election_intel
-bash start.sh
-# or with your key directly:
-bash start.sh sk-ant-api03-YOUR_KEY_HERE
-```
-
-### Android (Termux)
-1. Install **Termux** from [F-Droid](https://f-droid.org/packages/com.termux/) (not Play Store)
-2. In Termux:
-```bash
-pkg update && pkg install python
-```
-3. Copy this folder to your phone (USB, Google Drive, etc.)
-4. In Termux, navigate to the folder:
-```bash
-cd /sdcard/wb_election_intel
-bash start_android.sh
-```
-5. Open Chrome → `http://localhost:5050`
-
-### iPhone / iPad
-iOS does not allow running local servers. Options:
-- Use a laptop/Mac on the same network and open `http://[laptop-ip]:5050` in Safari
-- Or use the dashboard directly inside [Claude.ai](https://claude.ai) (no proxy needed there)
+The result is a continuously updated intelligence dashboard showing threat level, violence incident count, key developments, observer action recommendations, and a historical trend — all computed locally and displayed cleanly on both desktop and mobile.
 
 ---
 
-## Getting your API key
+## Dashboard features
 
-1. Go to [console.anthropic.com](https://console.anthropic.com/)
-2. Sign in or create a free account
-3. Click **API Keys** → **Create Key**
-4. Copy the key (starts with `sk-ant-api03-...`)
-5. Paste it when the proxy prompts, or in the dashboard sidebar
-
-The key is saved in `.api_key` in this folder after the first run.
-You won't need to paste it again on the same device.
-
-**Keep your API key private.** Do not share this folder with the `.api_key` file.
-
----
-
-## How to use the dashboard
-
-### Normal monitoring (pre-election)
-1. Start the proxy (see above)
-2. Open `http://localhost:5050`
-3. Click **Fetch & Analyse Now** for the first cycle
-4. Dashboard auto-refreshes every **30 minutes**
-
-### Election day (23 April 2026)
-1. Click **Switch to Election Day Mode** in the sidebar
-2. Auto-refresh drops to **15 minutes**
-3. Each cycle searches for: Bankura incidents, MCC violations, TMC/BJP clashes,
-   EVM issues, booth capture reports, paramilitary updates, disinformation
-
-### Reading the dashboard
-- **Threat level** (top right metric): LOW → MODERATE → HIGH → CRITICAL
-- **Red feed items** = high severity, requires immediate attention
-- **Amber items** = medium severity, monitor closely
-- **Intelligence Summary** = Claude's synthesised analysis with observer actions
-
----
-
-## Memory and timeline
-
-Every fetch cycle is saved automatically in your browser's localStorage.
-Data persists across restarts.
-
-### View timeline
-- Click **📜 View election timeline** in the sidebar
-- Shows every cycle from newest to oldest
-- Colour-coded dots: green=LOW, amber=MODERATE/HIGH, red=CRITICAL
-
-### Export your data
-From the timeline modal:
-- **Export JSON** — full structured data, all cycles
-- **Export CSV** — spreadsheet-friendly, one row per cycle
-
-### Generate video
-- Click **🎬 Export as video** in the sidebar
-- Downloads a self-contained HTML slideshow
-- One slide per intelligence cycle, auto-advancing
-- To convert to video file:
-  - **Mac**: QuickTime Player → File → New Screen Recording
-  - **Any platform**: [OBS Studio](https://obsproject.com) (free) → Window Capture
-
-### Transfer memory to another device
-1. On device A: Timeline → **Export JSON**
-2. Keep the JSON file safe — it's your full election record
-3. The JSON contains timestamps, threat levels, all feed items, and analysis
-
----
-
-## The OSINT source directory
-
-Open `http://localhost:5050/osint` for the manual OSINT monitor.
-
-This is a curated, clickable directory of:
-- Bengali news channels (Zee 24 Ghanta, ABP Ananda, TV9 Bangla live streams)
-- National English press (NDTV, Indian Express, The Hindu — WB filtered)
-- Google News pre-filtered for each district (Bankura, Bishnupur, Purulia,
-  Jhargram, Birbhum, Paschim Bardhaman)
-- Social media (X/Twitter live searches, Reddit, Bengali hashtags)
-- Official portals (ECI, CEO West Bengal, Bankura District, MCC guidelines)
-- Fact-check / disinfo (BOOM Live, AltNews, AFP Fact Check)
-- Law & order (WB Police, Bankura violence feeds)
-- OSINT tools (Google Trends WB, Google Alerts, OSINT Framework)
-
-Use this alongside the auto dashboard for manual source verification.
-
----
-
-## Troubleshooting
-
-### "Type error" or fetch fails
-- Make sure the proxy is running (Terminal/Command Prompt window must stay open)
-- Check the proxy shows `✓ localhost proxy active` in the dashboard sidebar
-- Verify your API key at [console.anthropic.com](https://console.anthropic.com/)
-
-### Browser won't open automatically
-- Go to `http://localhost:5050` manually
-
-### Port 5050 already in use
-- The proxy automatically tries nearby ports (5051, 5052...)
-- Or specify a different port: `python3 proxy.py --port 8080`
-
-### Dashboard shows red "⚠ file:// — run proxy.py"
-- You opened the HTML file directly. Always use the proxy instead.
-- Start the proxy and open `http://localhost:5050`
-
-### API key errors (401)
-- Key may have expired or been revoked
-- Generate a new key at [console.anthropic.com](https://console.anthropic.com/)
-- Delete `.api_key` file and restart the proxy to re-enter
-
-### Slow or no results
-- Each cycle makes multiple web searches — can take 30–60 seconds
-- Requires internet connection (searches live news)
-
----
-
-## Network requirements
-
-The proxy needs outbound HTTPS access to:
-- `api.anthropic.com` — for Claude API calls (search + analysis)
-- `fonts.googleapis.com` — for dashboard fonts (optional, works without)
-
-No inbound connections. No data stored remotely. All intelligence data
-stays in your browser's localStorage on your device.
-
----
-
-## Election dates — quick reference
-
-| Event | Date |
+| Feature | Description |
 |---|---|
-| Schedule announced | 15 March 2026 |
-| MCC in force | 15 March 2026 |
-| Phase 1 polling (Bankura + surrounds) | **23 April 2026** |
-| Phase 2 polling (southern/eastern WB) | 29 April 2026 |
-| Counting & results | **4 May 2026** |
-
-### Bankura's 12 Assembly Constituencies
-
-| # | Constituency | Type |
-|---|---|---|
-| 247 | Saltora | SC |
-| 248 | Chhatna | General |
-| 249 | Ranibandh | ST |
-| 250 | Raipur | ST |
-| 251 | Taldangra | General |
-| 252 | Bankura (HQ) | General |
-| 253 | Barjora | General |
-| 254 | Onda | General |
-| 255 | Bishnupur | General |
-| 256 | Kotulpur | SC |
-| 257 | Indas | SC |
-| 258 | Sonamukhi | SC |
-
-Surrounding Phase 1 districts: **Purulia, Jhargram, Birbhum,
-Paschim Bardhaman, Paschim Medinipur**
+| **Live threat level** | CRITICAL / HIGH / MODERATE / LOW — computed from unique violence incident count, not raw article volume |
+| **Signal metrics** | Total WB-relevant signals, high-priority alerts, violence/incident reports — updated every cycle |
+| **LLM analysis** | Bankura situation brief, statewide context, key developments, observer action checklist, disinfo alerts |
+| **AC constituency map** | Interactive Leaflet map of all 9 Bankura assembly constituencies with candidate overlays |
+| **Political figures monitor** | Per-candidate news tracking for all key Bankura candidates and district leaders |
+| **Threat & signal trend** | Chart.js sparkline across the full observation period — start / mid / current date on X axis |
+| **7 news feed panels** | Bankura, Surrounding districts, WB statewide, Alerts, Official/ECI, Party statements, Bengali media |
+| **Wire tracker** | ANI + PTI West Bengal wire feed, 10-minute cache |
+| **Night digest** | AI-summarised MED/HIGH priority articles for end-of-day review, with unread badge |
+| **Intelligence timeline** | Searchable cycle-by-cycle record with threat level, analysis, and feed snapshots |
+| **Push alerts** | Browser notifications on threat level escalation |
+| **Turnout dashboard** | Live turnout entry and chart (election day mode) |
+| **Mobile-first layout** | Adaptive single-column layout, hamburger sidebar, horizontal ticker, priority feed (HIGH→MED→LOW) |
+| **Video export** | Animated HTML slideshow of all stored intelligence cycles |
 
 ---
 
-*Built for official election observer use · All data sourced live from public web*
-*No data transmitted to third parties beyond Anthropic API calls*
+## Architecture
+
+```
+Google News RSS (30+ feeds)
+        │
+        ▼
+proxy_local.py  ──── Geo-filter ──── Dedup ──── Incident fingerprint
+        │
+        ├──▶  Ollama (qwen2.5:7b, local VRAM)
+        │          └── Structured JSON assessment
+        │
+        ├──▶  SQLite (bankura_intel.db)
+        │          ├── cycles
+        │          ├── digested_articles
+        │          └── turnout_snapshots
+        │
+        └──▶  HTTP :5050
+                   │
+                   └──▶  Cloudflare Tunnel (HTTPS)
+                                │
+                         elections-live.observer
+                                │
+                    ┌───────────┴───────────┐
+                    ▼                       ▼
+             Desktop Browser          Mobile Browser
+```
+
+**Key design decisions:**
+
+- **Central fetch, many readers** — One LLM cycle runs every 15 min server-side; all clients read from `/api/latest` (SQLite-backed). No per-client LLM calls.
+- **Incident-level deduplication** — Violence is counted by unique `(location, violence_type)` fingerprints, not article count. Nine outlets reporting the same Malda incident = 1 incident.
+- **Fully local LLM** — `qwen2.5:7b` via Ollama. No OpenAI, Groq, or Gemini required (though all are supported as fallback backends).
+- **Single HTML file frontend** — The entire dashboard is one self-contained HTML file served by the Python proxy. No build step, no node_modules, no framework.
+- **Dev/prod isolation** — Dev instance on port 5055, prod on 5050. All changes land in dev first, then synced to prod after verification.
+
+---
+
+## Stack
+
+| Component | Technology |
+|---|---|
+| Backend proxy | Python 3.9 — stdlib only (`http.server`, `sqlite3`, `urllib`) |
+| LLM inference | Ollama — `qwen2.5:7b` (local, VRAM-resident) |
+| Database | SQLite 3 |
+| Frontend | Vanilla HTML/CSS/JS — no framework |
+| Charts | Chart.js 4.4.0 |
+| Maps | Leaflet 1.9.4 |
+| Public tunnel | Cloudflare Tunnel (`cloudflared`) |
+| Auto-restart | macOS LaunchAgent (plist) |
+| News sources | Google News RSS (GNews URL scheme) |
+
+---
+
+## Intelligence pipeline detail
+
+### Geo-filtering
+Articles are accepted only if they contain West Bengal geographic keywords (district names, Kolkata, Mamata, TMC, etc.) and are rejected if they match a hard blocklist of unrelated topics: Manipur, Chhattisgarh, international news, IPL, stock market, Bollywood.
+
+### Violence deduplication
+The old approach counted keyword hits in articles — so 9 outlets covering the same incident = 9 violence "reports." The current approach fingerprints each incident as `location__violence_type` (e.g. `malda__violence`) and counts unique fingerprints. This prevents a single widely-covered incident from inflating the threat level.
+
+### Threat calibration
+```
+CRITICAL  → 5+ distinct violence incidents
+HIGH      → 2–4 distinct violence incidents
+MODERATE  → 1 incident OR 3+ MCC violations
+LOW       → No confirmed incidents
+```
+
+### RSS feed windows
+All feeds use a 48-hour rolling window (`when=2d`). This keeps signal count at ~50–70 relevant articles per cycle rather than 140–200 with a 4-day window, reducing noise and LLM prompt length.
+
+---
+
+## Running locally
+
+### Prerequisites
+- Python 3.9+
+- [Ollama](https://ollama.com) with `qwen2.5:7b` pulled
+- (Optional) Cloudflare tunnel for public access
+
+### Start
+
+```bash
+# Pull the model once
+ollama pull qwen2.5:7b
+
+# Start the proxy
+cd wb_election_intel
+python3 proxy_local.py --backend ollama
+
+# Open in browser
+open http://localhost:5050
+```
+
+### Alternative backends (if no local GPU)
+
+```bash
+# Groq (free tier, fast)
+python3 proxy_local.py --backend groq --key gsk_YOUR_KEY
+
+# Google Gemini (free tier)
+python3 proxy_local.py --backend gemini --key AIza_YOUR_KEY
+```
+
+### Public access via Cloudflare tunnel
+
+```bash
+# One-time setup
+cloudflared tunnel create wb-elections-live
+cloudflared tunnel route dns wb-elections-live your-domain.com
+
+# Run
+cloudflared tunnel --config ~/.cloudflared/config.yml run wb-elections-live
+```
+
+---
+
+## Security notes
+
+- All credentials (`telegram_config.json`, `.env`, `*.session`) are `chmod 600` and gitignored — never committed
+- The Cloudflare tunnel provides HTTPS termination; the local proxy runs HTTP on localhost only
+- All `/api/*` calls in the frontend use `window.location.origin` — works correctly over both localhost and the HTTPS tunnel without hardcoded URLs
+- The SQLite database is gitignored and stays local
+
+---
+
+## Observation context
+
+Built for Phase 1 of the West Bengal Assembly Elections 2026 (23 April 2026). Primary coverage: **Bankura district** and its assembly constituencies — Saltora, Chhatna, Ranibandh (ST), Raipur (ST), Taldangra, Barjora, Onda, Sonamukhi, Kotulpur (SC), Indas, Bishnupur.
+
+Extended coverage: Purulia, Jhargram, Birbhum, Paschim Bardhaman, Paschim Medinipur.
+
+---
+
+## Disclaimer
+
+This tool is for election observation and public interest journalism purposes. All data is sourced from publicly available news feeds. The LLM analysis is an automated first-pass assessment and must be verified by a qualified human observer before any official action is taken. Threat levels are indicative, not definitive.
+
+---
+
+*Built with Python, Ollama, Chart.js, Leaflet, and Cloudflare Tunnel.*
