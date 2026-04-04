@@ -6,6 +6,8 @@
 <title>WB Election Intel Dashboard — Bankura 2026</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <style>
 :root{
   --bg:#f1f5f9;--bg2:#ffffff;--bg3:#f8fafc;--bg4:#e8eef6;
@@ -17,6 +19,14 @@
   --purple:#7c3aed;--teal:#0891b2;
   --text:#0f172a;--text2:#334155;--text3:#64748b;
   --card-bg:#ffffff;
+  --shadow:rgba(0,0,0,0.06);
+}
+/* ── DARK MODE ── */
+[data-theme="dark"]{
+  --bg:#0f172a;--bg2:#1e293b;--bg3:#162032;--bg4:#1e2d47;
+  --border:#334155;--border2:#475569;
+  --text:#f1f5f9;--text2:#cbd5e1;--text3:#94a3b8;
+  --card-bg:#1e293b;--shadow:rgba(0,0,0,0.35);
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;font-size:14px;line-height:1.6;min-height:100vh}
@@ -69,6 +79,99 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 .alert-banner.show{display:flex}
 .alert-icon{font-size:16px}
 
+/* NOTIFICATION SIDEBAR CARD */
+.notif-status{font-size:10px;font-family:'JetBrains Mono',monospace;padding:2px 7px;border-radius:10px;display:inline-block;vertical-align:middle;margin-left:4px}
+.notif-status.on{background:rgba(22,163,74,0.15);color:var(--green2)}
+.notif-status.off{background:rgba(100,116,139,0.12);color:var(--text3)}
+.notif-status.blocked{background:rgba(220,38,38,0.1);color:var(--red2)}
+
+/* TREND SPARKLINE PANEL */
+.trend-panel{background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:14px}
+.trend-header{padding:10px 14px;border-bottom:1px solid var(--border);background:var(--bg3);display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600}
+.trend-meta{margin-left:auto;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)}
+.trend-chart-wrap{padding:10px 14px 4px;height:110px;position:relative}
+@keyframes trendLivePulse{0%{box-shadow:0 0 0 0 rgba(220,38,38,.8);opacity:1}60%{box-shadow:0 0 0 7px rgba(220,38,38,0);opacity:.9}100%{box-shadow:0 0 0 0 rgba(220,38,38,0);opacity:1}}
+#trendBlinkDot{position:absolute;width:8px;height:8px;border-radius:50%;background:#dc2626;pointer-events:none;z-index:10;transform:translate(-50%,-50%);animation:trendLivePulse 1.5s ease-out infinite}
+.trend-legend{display:flex;gap:16px;padding:4px 14px 10px;font-size:11px;color:var(--text3);flex-wrap:wrap}
+.trend-legend span{display:flex;align-items:center;gap:5px}
+.trend-l-low::before,.trend-l-mod::before,.trend-l-high::before,.trend-l-alert::before,.trend-l-viol::before{content:'';width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:2px}
+.trend-l-low::before{background:var(--green)}.trend-l-mod::before{background:var(--amber)}
+.trend-l-high::before{background:var(--red)}.trend-l-alert::before{background:#d97706;border-radius:2px}
+.trend-l-viol::before{background:#dc2626;border-radius:2px}
+
+/* THEME TOGGLE BUTTON */
+.theme-toggle{background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);
+  color:#fff;border-radius:20px;padding:4px 10px;font-size:12px;cursor:pointer;
+  display:flex;align-items:center;gap:5px;font-family:'JetBrains Mono',monospace}
+.theme-toggle:hover{background:rgba(255,255,255,0.25)}
+
+/* DIGEST SIDEBAR BADGE */
+.digest-badge{background:var(--red);color:#fff;font-size:10px;font-family:'JetBrains Mono',monospace;
+  padding:1px 6px;border-radius:10px;margin-left:4px;display:none}
+.digest-badge.show{display:inline-block}
+
+/* DIGEST MODAL */
+.digest-modal-wrap{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);
+  z-index:500;align-items:flex-start;justify-content:center;padding:24px 16px;overflow-y:auto}
+.digest-modal-wrap.open{display:flex}
+.digest-modal{background:var(--bg2);border:1px solid var(--border);border-radius:14px;
+  width:100%;max-width:860px;max-height:88vh;display:flex;flex-direction:column;
+  box-shadow:0 20px 60px var(--shadow)}
+.dm-header{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;
+  align-items:center;gap:10px;flex-wrap:wrap;background:var(--bg3);border-radius:14px 14px 0 0}
+.dm-title{font-size:15px;font-weight:600;flex:1}
+.dm-filter{padding:4px 10px;border-radius:6px;border:1px solid var(--border2);
+  background:var(--bg);color:var(--text);font-size:12px;cursor:pointer}
+.dm-btn{padding:5px 12px;border-radius:6px;border:1px solid var(--border2);
+  background:var(--bg4);color:var(--text2);font-size:12px;cursor:pointer;white-space:nowrap}
+.dm-btn:hover{border-color:var(--accent);color:var(--accent)}
+.dm-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.dm-close{background:none;border:none;font-size:18px;cursor:pointer;color:var(--text3);
+  padding:2px 6px;border-radius:4px}
+.dm-close:hover{background:var(--bg4);color:var(--text)}
+.dm-stats{padding:8px 20px;border-bottom:1px solid var(--border);font-size:11px;
+  font-family:'JetBrains Mono',monospace;color:var(--text3);display:flex;gap:16px;flex-wrap:wrap}
+.dm-stat-pill{background:var(--bg3);padding:2px 8px;border-radius:10px;border:1px solid var(--border)}
+.dm-stat-pill.done{border-color:rgba(22,163,74,0.4);color:var(--green)}
+.dm-stat-pill.pending{border-color:rgba(217,119,6,0.4);color:var(--amber)}
+.dm-stat-pill.high{border-color:rgba(220,38,38,0.4);color:var(--red2)}
+.dm-body{overflow-y:auto;padding:14px 20px;display:flex;flex-direction:column;gap:10px;flex:1}
+/* Digest article card */
+.da-card{border:1px solid var(--border);border-radius:10px;padding:12px 14px;
+  background:var(--card-bg);transition:border-color .15s}
+.da-card.da-high{border-left:3px solid var(--red)}
+.da-card.da-medium{border-left:3px solid var(--amber)}
+.da-card.da-read{opacity:0.55}
+.da-card:hover{border-color:var(--border2)}
+.da-row1{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:5px}
+.da-sev{font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace;padding:2px 7px;
+  border-radius:10px}
+.da-sev-high{background:rgba(220,38,38,0.12);color:var(--red2)}
+.da-sev-med{background:rgba(217,119,6,0.12);color:var(--amber2)}
+.da-panel{font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3);
+  background:var(--bg3);padding:2px 7px;border-radius:10px;border:1px solid var(--border)}
+.da-source{font-size:11px;color:var(--text3)}
+.da-time{font-size:10px;color:var(--text3);margin-left:auto;font-family:'JetBrains Mono',monospace}
+.da-title{font-size:13px;font-weight:500;color:var(--text);margin-bottom:6px;line-height:1.45}
+.da-title a{color:var(--text);text-decoration:none}
+.da-title a:hover{color:var(--accent);text-decoration:underline}
+.da-digest{font-size:12.5px;color:var(--text2);line-height:1.65;border-left:2px solid var(--border2);
+  padding-left:10px;margin-top:4px}
+.da-pending{font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--amber);
+  margin-top:4px;display:flex;align-items:center;gap:6px}
+.da-failed{font-size:11px;color:var(--text3);margin-top:4px}
+.da-actions{display:flex;gap:6px;margin-top:8px}
+.da-act-btn{font-size:11px;padding:3px 10px;border-radius:5px;border:1px solid var(--border);
+  background:transparent;color:var(--text3);cursor:pointer}
+.da-act-btn:hover{border-color:var(--accent);color:var(--accent)}
+/* Night brief reading mode */
+.dm-nightmode .da-card{border:none;border-bottom:1px solid var(--border);border-radius:0;
+  padding:16px 0}
+.dm-nightmode .da-digest{font-size:14px;line-height:1.8;border-left:none;padding-left:0}
+.dm-nightmode .da-actions,.dm-nightmode .da-row1{display:none}
+.dm-nightmode .da-title{font-size:14px;font-weight:600;margin-bottom:8px}
+.dm-empty{padding:40px;text-align:center;color:var(--text3);font-size:13px}
+
 /* METRICS ROW */
 .metrics-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .metric-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px}
@@ -119,6 +222,26 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 /* PROGRESS BAR */
 .refresh-progress{height:2px;background:var(--border);position:relative;overflow:hidden}
 .refresh-bar{height:100%;background:var(--accent);transition:width 1s linear}
+
+/* INTEL GRID — 3-col top strip */
+.intel-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;align-items:start}
+/* MID ROW — figures + trend */
+.mid-row{display:flex;gap:14px;align-items:flex-start}
+.mid-row>*{flex:1;min-width:0}
+/* WIRE TICKER — default height keeps viewport bounded before intel panel renders */
+.wire-panel{background:var(--bg2);border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;overflow:hidden;height:480px}
+.wire-header{padding:9px 12px;border-bottom:1px solid var(--border);background:var(--bg3);display:flex;align-items:center;gap:6px;flex-shrink:0}
+.wire-viewport{overflow:hidden;flex:1;min-height:0}
+.wire-inner{display:flex;flex-direction:column;will-change:transform}
+.wire-item{padding:7px 10px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s}
+.wire-item:hover{background:var(--bg3)}
+.wire-item-src{font-size:9px;font-family:'JetBrains Mono',monospace;letter-spacing:.04em;margin-bottom:2px}
+.wire-item-src.ani{color:#e04444}.wire-item-src.pti{color:#22c55e}
+.wire-item-title{font-size:11px;color:var(--text2);line-height:1.45}
+.wire-item.w-high .wire-item-title{color:var(--red)}
+.wire-item.w-med  .wire-item-title{color:var(--amber)}
+@media(max-width:960px){.intel-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:600px){.intel-grid{grid-template-columns:1fr}.mid-row{flex-direction:column}}
 
 /* SCROLLBAR */
 ::-webkit-scrollbar{width:4px}
@@ -173,6 +296,40 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 .empty-state{padding:32px;text-align:center;color:var(--text3);font-size:13px}
 .empty-icon{font-size:28px;margin-bottom:8px;display:block}
 
+/* ── TURNOUT ROW (Phase 3C) ── */
+.turnout-row{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:10px}
+.turnout-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;position:relative}
+.turnout-district{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.turnout-pct{font-size:22px;font-weight:700;font-family:'JetBrains Mono',monospace;line-height:1;color:var(--accent2)}
+.turnout-pct.high{color:#22c55e}.turnout-pct.med{color:#f59e0b}.turnout-pct.low{color:var(--text3)}
+.turnout-bar-wrap{background:var(--bg3);border-radius:3px;height:4px;margin-top:6px;overflow:hidden}
+.turnout-bar{height:4px;border-radius:3px;background:var(--accent2);transition:width .4s}
+.turnout-src{font-size:9px;color:var(--text3);margin-top:4px;font-family:'JetBrains Mono',monospace}
+.turnout-chart-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;grid-column:1/-1}
+.turnout-chart-wrap{position:relative;height:110px}
+
+/* ── MAP PANEL (Phase 4) ── */
+.map-panel{background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:10px}
+.map-panel-header{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;user-select:none}
+.map-panel-title{font-size:12px;font-weight:600;flex:1;color:var(--text)}
+.map-panel-meta{font-size:10px;color:var(--text3);font-family:'JetBrains Mono',monospace}
+.map-panel-toggle{font-size:11px;color:var(--text3);background:none;border:none;cursor:pointer;padding:0 4px}
+#bankuraMap{height:340px;width:100%;background:var(--bg3)}
+/* Leaflet dark-mode overrides */
+[data-theme="dark"] .leaflet-tile{filter:brightness(.75) invert(1) contrast(3) hue-rotate(200deg) saturate(.3) brightness(.7)}
+[data-theme="dark"] .leaflet-container{background:#1e293b}
+/* AC popup */
+.ac-popup h4{margin:0 0 6px;font-size:13px;font-family:'JetBrains Mono',monospace}
+.ac-popup .threat-badge{display:inline-block;padding:1px 7px;border-radius:4px;font-size:10px;font-weight:700;margin-left:6px}
+.ac-popup .stat-row{font-size:11px;color:#64748b;margin-bottom:4px}
+.ac-popup .fig-row{font-size:11px;margin-top:6px;padding-top:6px;border-top:1px solid #e2e8f0}
+/* AC pulse animation for HIGH/CRITICAL */
+@keyframes acPulse{0%{opacity:.7}50%{opacity:1}100%{opacity:.7}}
+.ac-pulse{animation:acPulse 1.8s ease-in-out infinite}
+/* Legend */
+.map-legend{position:absolute;bottom:18px;right:10px;z-index:1000;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:10px;font-family:'JetBrains Mono',monospace;line-height:1.8}
+.map-legend-dot{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:middle}
+
 /* ── CHARTS ROW ── */
 .charts-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .chart-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
@@ -211,7 +368,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 /* ── FIGURE MONITOR ── */
 .figure-monitor{background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden}
 .figure-monitor-header{padding:10px 14px;border-bottom:1px solid var(--border);background:var(--bg3);display:flex;align-items:center;gap:8px}
-.figure-monitor-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;padding:12px}
+.figure-monitor-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:10px;padding:12px}
 .fig-card{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 12px;border-left:3px solid var(--border2);transition:box-shadow .15s}
 .fig-card:hover{box-shadow:0 2px 8px rgba(0,0,0,0.08)}
 .fig-card.party-tmc{border-left-color:#10b981}
@@ -234,6 +391,17 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 .fig-headline a:hover{color:var(--accent)}
 .fig-headline .sev-badge{font-size:9px;font-family:'JetBrains Mono',monospace;padding:1px 5px;border-radius:6px;margin-right:4px}
 .fig-no-mention{font-size:11px;color:var(--text3);font-style:italic;padding:2px 0}
+/* Political figures monitor — compact mode */
+@keyframes figBlink{0%,100%{opacity:1}50%{opacity:.25}}
+.fig-new-badge{font-size:9px;font-family:'JetBrains Mono',monospace;font-weight:700;
+  padding:2px 8px;border-radius:10px;background:rgba(220,38,38,0.15);color:var(--red2);
+  border:1px solid rgba(220,38,38,0.35);animation:figBlink 2s ease-in-out infinite;
+  white-space:nowrap;margin-right:6px}
+/* Phase 3B — candidate news strip */
+.fig-news-strip{margin-top:6px;padding-top:6px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:3px}
+.fig-news-item{font-size:10px;color:var(--text3);text-decoration:none;display:block;padding:3px 6px;border-radius:4px;background:var(--bg4);line-height:1.4;transition:color .12s}
+.fig-news-item:hover{color:var(--accent)}
+.fig-news-age{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--accent3);margin-right:4px;font-weight:600}
 
 /* ── PARTIES FEED BADGE ── */
 .fb-parties{background:rgba(139,92,246,0.15);color:var(--purple)}
@@ -255,6 +423,217 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 .fi-footer{display:flex;align-items:center;justify-content:space-between;margin-top:3px}
 .fi-link{font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--accent2);text-decoration:none;padding:1px 6px;border-radius:4px;border:1px solid rgba(59,130,246,0.3);transition:all .12s}
 .fi-link:hover{background:rgba(59,130,246,0.1)}
+
+/* ── MOBILE TICKER STRIP ── */
+#mobTickerStrip{display:none;align-items:center;background:var(--bg2);border-bottom:1px solid var(--border);overflow:hidden;height:28px;flex-shrink:0}
+#mobTickerStrip .mtk-label{font-size:9px;font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--red2);padding:0 8px;flex-shrink:0;letter-spacing:.04em;border-right:1px solid var(--border)}
+#mobTickerStrip .mtk-track{overflow:hidden;flex:1;height:28px;display:flex;align-items:center}
+#mobTickerStrip .mtk-inner{display:flex;gap:28px;white-space:nowrap;font-size:11px;color:var(--text2);animation:mtkScroll 60s linear infinite}
+#mobTickerStrip .mtk-inner a{color:var(--text2);text-decoration:none}
+#mobTickerStrip .mtk-inner a:hover{color:var(--accent)}
+#mobTickerStrip .mtk-sep{color:var(--border2);flex-shrink:0}
+@keyframes mtkScroll{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+
+/* ── MOBILE PRIORITY FEED ── */
+#mobPriorityFeed{display:none;background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+#mobPriorityFeed .mpf-header{padding:8px 12px;border-bottom:1px solid var(--border);background:var(--bg3);display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600}
+#mobPriorityFeed .mpf-item{padding:7px 10px 7px 0;border-bottom:1px solid var(--border);display:flex;gap:7px;align-items:flex-start}
+#mobPriorityFeed .mpf-item:last-child{border-bottom:none}
+#mobPriorityFeed .mpf-dot{font-size:11px;flex-shrink:0;margin-top:1px;padding-left:10px}
+#mobPriorityFeed .mpf-body{flex:1;min-width:0}
+#mobPriorityFeed .mpf-meta{display:flex;align-items:center;gap:4px;margin-bottom:2px;flex-wrap:wrap}
+#mobPriorityFeed .mpf-panel{font-size:9px;font-family:'JetBrains Mono',monospace;background:var(--bg4);padding:1px 5px;border-radius:3px;color:var(--text3)}
+#mobPriorityFeed .mpf-src{font-size:9px;font-family:'JetBrains Mono',monospace;color:var(--accent2)}
+#mobPriorityFeed .mpf-time{font-size:9px;font-family:'JetBrains Mono',monospace;color:var(--text3);margin-left:auto}
+#mobPriorityFeed .mpf-text{font-size:11.5px;color:var(--text);line-height:1.4}
+#mobPriorityFeed .mpf-text a{color:inherit;text-decoration:none}
+#mobPriorityFeed .mpf-text a:hover{color:var(--accent)}
+#mobPriorityFeed .mpf-empty{padding:20px;text-align:center;color:var(--text3);font-size:12px}
+
+/* ── MOBILE ANALYSIS EXPAND (hidden on desktop) ── */
+.mob-analysis-expand{display:none;width:100%;padding:4px;font-size:11px;
+  font-family:'JetBrains Mono',monospace;color:var(--accent2);cursor:pointer;
+  background:var(--bg3);border:none;border-top:1px solid var(--border);
+  text-align:center;letter-spacing:.03em}
+/* ── DISCLAIMER SIDEBAR BUTTON (hidden on desktop, shown in sidebar on mobile) ── */
+#disclaimerSidebarBtn{display:none}
+/* ── MOBILE HAMBURGER (hidden on desktop) ── */
+.mob-hamburger{display:none;align-items:center;justify-content:center;
+  background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);
+  color:#fff;border-radius:6px;padding:5px 10px;font-size:18px;line-height:1;
+  cursor:pointer;flex-shrink:0;font-family:inherit}
+.sidebar-close-bar{display:none}
+.sidebar-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:299;top:48px}
+/* desktop: sidebar always visible in grid */
+
+/* ── MOBILE RESPONSIVE (≤768px) ── */
+@media(max-width:768px){
+  /* ── Topbar: strict single line, no wrapping ── */
+  .topbar{padding:0 10px;gap:6px;height:48px;flex-wrap:nowrap;align-items:center}
+  .logo{display:none}
+  .topbar>.sep{display:none}
+  /* Title block: shrinks & truncates, never wraps */
+  .topbar>div:nth-child(3){flex:1;min-width:0;overflow:hidden}
+  .hdr-district{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .hdr-sub{display:none}
+  /* Disclaimer button: hidden from topbar on mobile — accessible via sidebar */
+  #disclaimerBtn{display:none}
+  /* Right controls: stay compact, never wrap */
+  .hdr-right{gap:4px;flex-shrink:0;flex-wrap:nowrap}
+  .clock-display{display:none}
+  .mode-badge{display:none}
+  .next-refresh{display:none}
+  .status-label{display:none}
+  .pulse-dot{width:7px;height:7px}
+  .theme-toggle{padding:3px 6px;font-size:10px;gap:2px}
+  .mob-hamburger{display:flex;padding:4px 8px;font-size:16px}
+
+  /* ── Main layout: full width ── */
+  .main{grid-template-columns:1fr}
+
+  /* ── Sidebar: compact slide-in drawer ── */
+  .sidebar{
+    position:fixed;top:48px;left:0;bottom:0;width:64vw;max-width:210px;z-index:300;
+    transform:translateX(-105%);transition:transform .25s cubic-bezier(.4,0,.2,1);
+    box-shadow:6px 0 24px rgba(0,0,0,0.18);overflow-y:auto;overflow-x:hidden
+  }
+  .sidebar.mob-open{transform:translateX(0)}
+  .sidebar-backdrop{display:none;position:fixed;inset:0;top:48px;
+    background:rgba(0,0,0,0.45);z-index:299}
+  .sidebar-backdrop.mob-open{display:block}
+  /* Sidebar close bar */
+  .sidebar-close-bar{display:flex;align-items:center;justify-content:space-between;
+    padding:8px 12px 5px;border-bottom:1px solid var(--border);margin-bottom:4px;flex-shrink:0}
+  .sidebar-close-bar span{font-size:10px;font-weight:600;text-transform:uppercase;
+    letter-spacing:.08em;color:var(--text3);font-family:'JetBrains Mono',monospace}
+  .sidebar-close-btn{background:none;border:1px solid var(--border2);color:var(--text3);
+    border-radius:5px;padding:2px 8px;font-size:13px;cursor:pointer;line-height:1}
+  /* Show disclaimer inside sidebar on mobile */
+  #disclaimerSidebarBtn{display:flex !important}
+
+  /* ── Content ── */
+  .content{padding:8px;gap:10px}
+
+  /* ── Metrics — 2×2 ── */
+  .metrics-row{grid-template-columns:repeat(2,1fr);gap:7px}
+  .metric-val{font-size:19px}
+  .metric-card{padding:9px 11px}
+
+  /* ── Feed items — tighter ── */
+  .feed-item{padding:7px 10px;font-size:11.5px}
+  .fi-text{line-height:1.4;margin-bottom:2px}
+  .feeds-grid{grid-template-columns:1fr;gap:8px}
+
+  /* ── Intel grid ── */
+  .intel-grid{gap:8px}
+
+  /* ── Analysis panel — truncate on mobile ── */
+  .analysis-body{max-height:100px;overflow:hidden;position:relative;min-height:unset}
+  .analysis-body.mob-expanded{max-height:none}
+  .analysis-body:not(.mob-expanded)::after{
+    content:'';position:absolute;bottom:0;left:0;right:0;height:36px;
+    background:linear-gradient(transparent,var(--bg2));pointer-events:none}
+  .mob-analysis-expand{display:flex !important}
+
+  /* ── Wire: hidden on mobile (content flows into priority feed) ── */
+  .wire-panel{display:none !important}
+
+  /* ── Priority feed: show on mobile ── */
+  #mobPriorityFeed{display:block}
+
+  /* ── Ticker: fixed strip flush under topbar, full viewport width, outside content flow ── */
+  #mobTickerStrip{
+    display:flex;
+    position:fixed;top:48px;left:0;right:0;z-index:190;
+    border-radius:0;margin:0
+  }
+
+  /* ── Push content below the fixed ticker (28px ticker height) ── */
+  .main{padding-top:28px}
+
+  /* ── Desktop feeds-grid: hide on mobile ── */
+  .feeds-grid{display:none !important}
+
+  /* ── Layout order (content is flex-direction:column) ── */
+  .content{display:flex;flex-direction:column}
+  .alert-banner{order:1}
+  .metrics-row{order:2}
+  /* dissolve mid-row so children join content flex flow independently */
+  .mid-row{display:contents}
+  .trend-panel{order:3}
+  #mobPriorityFeed{order:4}
+  .figure-monitor{order:5}
+  .intel-grid{order:6}
+  .charts-row{order:7}
+
+  /* ── Analysis panel: taller on mobile ── */
+  .analysis-body{max-height:160px}
+
+  /* ── Mid-row children: full width when stacked ── */
+  .mid-row{flex-direction:column;gap:8px}
+  .mid-row>*{width:100%;flex:none}
+
+  /* ── Trend panel: exact fit, zero dead space ── */
+  .trend-panel{
+    overflow:hidden;margin-bottom:0;
+    display:flex;flex-direction:column;
+    height:auto !important;width:100%
+  }
+  .trend-header{padding:6px 10px;font-size:12px;flex-shrink:0}
+  .trend-chart-wrap{
+    height:72px !important;
+    padding:3px 8px 3px !important;
+    flex-shrink:0;overflow:hidden;
+    position:relative
+  }
+  .trend-chart-wrap canvas{
+    display:block !important;
+    width:100% !important;
+    height:100% !important;
+    max-height:66px
+  }
+  .trend-legend{display:none !important;height:0;padding:0;margin:0;overflow:hidden}
+  .trend-meta{display:none}
+
+  /* ── Turnout ── */
+  .turnout-row{grid-template-columns:repeat(3,1fr);gap:5px}
+  .turnout-pct{font-size:17px}
+  .turnout-card{padding:7px 9px}
+
+  /* ── Charts ── */
+  .charts-row{grid-template-columns:1fr}
+
+  /* ── District map ── */
+  .district-map{grid-template-columns:1fr 1fr}
+
+  /* ── Figure monitor ── */
+  .figure-monitor-grid{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px;padding:8px}
+  .fig-card{padding:8px 10px}
+
+  /* ── Modals ── */
+  .tl-feeds{grid-template-columns:1fr}
+  .tl-modal{width:96vw;max-height:92vh}
+  .digest-modal{max-height:92vh}
+  .dm-header{padding:9px 12px}
+  .dm-body{padding:9px 12px}
+}
+
+/* ── VERY SMALL SCREENS (≤420px) ── */
+@media(max-width:420px){
+  .topbar{height:44px}
+  #mobTickerStrip{top:44px}
+  .main{padding-top:28px}
+  .sidebar{top:44px}
+  .sidebar-backdrop{top:44px}
+  .metrics-row{grid-template-columns:1fr 1fr}
+  .metric-val{font-size:17px}
+  .turnout-row{grid-template-columns:repeat(2,1fr)}
+  .figure-monitor-grid{grid-template-columns:1fr 1fr}
+  .feeds-grid{gap:6px}
+  .content{padding:6px;gap:8px}
+  .trend-chart-wrap{height:60px !important}
+  .trend-chart-wrap canvas{max-height:54px}
+}
 </style>
 </head>
 <body>
@@ -262,57 +641,101 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 <div class="topbar">
   <div class="logo">[ OSINT ]</div>
   <div class="sep"></div>
-  <div>
-    <div class="hdr-district">WB Election Intel · Bankura</div>
-    <div class="hdr-sub">Phase 1 · 23 April 2026</div>
+  <div style="display:flex;align-items:center;gap:10px">
+    <div>
+      <div class="hdr-district">WB Election Intel · Bankura</div>
+      <div class="hdr-sub">Phase 1 · 23 April 2026</div>
+    </div>
+    <button onclick="openDisclaimer()" id="disclaimerBtn" style="background:none;border:1px solid var(--amber);color:var(--amber);border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;cursor:pointer;letter-spacing:.03em;font-family:inherit;white-space:nowrap" title="Read disclaimer">⚠ DISCL.</button>
   </div>
   <div class="hdr-right">
     <div class="pulse-dot" id="liveDot"></div>
     <span class="status-label" id="statusLabel">STANDBY</span>
     <div class="sep"></div>
-    <div class="next-refresh" id="nextRefreshDisplay">Next: --:--</div>
     <div class="mode-badge mode-normal" id="modeBadge" onclick="toggleMode()">NORMAL MODE</div>
+    <button class="theme-toggle" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle dark/light mode">Light</button>
     <div class="clock-display" id="clock"></div>
+    <button class="mob-hamburger" onclick="toggleSidebar()" title="Menu" aria-label="Open menu">☰</button>
+  </div>
+</div>
+<!-- Mobile sidebar backdrop -->
+<div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeSidebar()"></div>
+
+<!-- DISCLAIMER MODAL -->
+<div id="disclaimerModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:var(--bg2);border:1px solid var(--amber);border-radius:10px;max-width:560px;width:90%;padding:28px 28px 22px;position:relative;box-shadow:0 8px 40px rgba(0,0,0,.5)">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+      
+      <div style="font-size:14px;font-weight:800;color:var(--amber);letter-spacing:.04em">DISCLAIMER</div>
+    </div>
+
+    <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:10px;letter-spacing:.02em">Academic Research Project — No Commercial Interest</div>
+
+    <div style="font-size:11.5px;color:var(--text2);line-height:1.7;display:flex;flex-direction:column;gap:10px">
+      <p style="margin:0">This platform is an <b style="color:var(--text)">independent academic project</b> developed solely for research and electoral observation purposes. It has <b style="color:var(--text)">no commercial interest</b> of any kind.</p>
+
+      <p style="margin:0">All information displayed here is collated from <b style="color:var(--text)">publicly available open-source platforms</b> — including news aggregators, social media, and public databases already accessible on the internet. This platform does not generate, fabricate, or alter any information.</p>
+
+      <p style="margin:0;padding:8px 12px;background:rgba(251,191,36,0.08);border-left:3px solid var(--amber);border-radius:0 4px 4px 0"><b style="color:var(--amber)">Please verify the accuracy and veracity of all information independently before making any decision.</b> The creators of this platform accept no liability for any action taken on the basis of information displayed here.</p>
+
+      <p style="margin:0">This website is <b style="color:var(--text)">not affiliated with, endorsed by, or connected to</b> any government body, political party, the Election Commission of India (ECI), or any other official authority.</p>
+    </div>
+
+    <div style="margin-top:20px;display:flex;justify-content:flex-end">
+      <button onclick="closeDisclaimer()" style="background:var(--amber);color:#000;border:none;border-radius:5px;padding:6px 20px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">I Understand</button>
+    </div>
   </div>
 </div>
 
 <div class="main">
 
   <!-- SIDEBAR -->
-  <div class="sidebar">
+  <div class="sidebar" id="mainSidebar">
+    <!-- Mobile close bar (hidden on desktop) -->
+    <div class="sidebar-close-bar">
+      <span>Menu</span>
+      <button class="sidebar-close-btn" onclick="closeSidebar()">✕</button>
+    </div>
+
+    <!-- Disclaimer shortcut inside sidebar — only visible on mobile via CSS -->
+    <button id="disclaimerSidebarBtn" class="ctrl-btn" onclick="openDisclaimer()" style="margin-bottom:2px">
+      <span class="btn-icon">⚠️</span> Disclaimer
+    </button>
 
     <div class="sidebar-section">
       <div class="sid-label">Controls</div>
-      <button class="ctrl-btn primary" onclick="runFetch(true)">
-        <span class="btn-icon">↻</span> Fetch &amp; Analyse Now
+      <button class="ctrl-btn primary" onclick="runFetch(true)" id="fetchNowBtn">
+        <span class="btn-icon">↻</span> <span id="fetchNowLabel">Refresh Data</span>
       </button>
-      <button class="ctrl-btn danger" onclick="toggleMode()" id="modeToggleBtn">
+      <button class="ctrl-btn danger" onclick="toggleMode()" id="modeToggleBtn" style="display:none">
         <span class="btn-icon">🚨</span> Switch to Election Day Mode
       </button>
     </div>
 
     <div class="sidebar-section">
-      <div class="sid-label">Refresh interval</div>
+      <div class="sid-label">Memory &amp; timeline</div>
+      <button class="ctrl-btn" onclick="openTimeline()">
+        <span class="btn-icon">📜</span> View election timeline
+      </button>
+      <button class="ctrl-btn" onclick="openVideoExport()">
+        <span class="btn-icon">🎬</span> Export as video
+      </button>
       <div class="stat-mini">
-        <div class="stat-mini-val" id="intervalDisplay" style="color:var(--accent2)">30 min</div>
-        <div class="stat-mini-lbl">Auto-refresh (normal mode)</div>
+        <div class="stat-mini-val" id="memCount" style="color:var(--purple)">0</div>
+        <div class="stat-mini-lbl">Cycles stored in memory</div>
       </div>
-      <div class="stat-mini">
-        <div class="stat-mini-val" id="cycleCount" style="color:var(--green2)">0</div>
-        <div class="stat-mini-lbl">Analysis cycles run</div>
-      </div>
-      <div class="stat-mini">
-        <div class="stat-mini-val" id="alertCount" style="color:var(--red2)">0</div>
-        <div class="stat-mini-lbl">High-priority alerts</div>
-      </div>
+      <button class="ctrl-btn tl-danger" style="font-size:11px;padding:6px 10px" onclick="clearMemory()">
+        <span class="btn-icon">🗑</span> Clear stored memory
+      </button>
     </div>
+
 
     <div class="sidebar-section">
       <div class="sid-label">Monitor topics</div>
       <div class="query-topics" id="topicList">
         <div class="chip-wrap">
           <div class="topic-chip active" onclick="toggleChip(0)">
-            <span>Bankura violence</span><span class="chip-count" id="cnt-0">—</span>
+            <span>Bankura</span><span class="chip-count" id="cnt-0">—</span>
           </div>
           <div class="chip-dropdown" id="chip-drop-0"></div>
         </div>
@@ -361,39 +784,82 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
       </div>
     </div>
 
-    <div class="sidebar-section">
-      <div class="sid-label">Memory &amp; timeline</div>
-      <button class="ctrl-btn" onclick="openTimeline()">
-        <span class="btn-icon">📜</span> View election timeline
-      </button>
-      <button class="ctrl-btn" onclick="openVideoExport()">
-        <span class="btn-icon">🎬</span> Export as video
-      </button>
-      <div class="stat-mini">
-        <div class="stat-mini-val" id="memCount" style="color:var(--purple)">0</div>
-        <div class="stat-mini-lbl">Cycles stored in memory</div>
+    <!-- TURNOUT MANUAL ENTRY (shown in election day mode) -->
+    <div class="sidebar-section" id="turnoutManualSection" style="display:none">
+      <div class="sid-label">Manual Turnout Entry</div>
+      <div style="font-size:10px;color:var(--text3);margin-bottom:6px">Enter official turnout % heard from polling officials.</div>
+      <select id="turnoutDistrict" style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:5px 6px;font-size:11px;margin-bottom:5px">
+        <option value="Bankura">Bankura</option>
+        <option value="Purulia">Purulia</option>
+        <option value="Jhargram">Jhargram</option>
+        <option value="Paschim Bardhaman">Paschim Bardhaman</option>
+        <option value="Paschim Medinipur">Paschim Medinipur</option>
+        <option value="Birbhum">Birbhum</option>
+      </select>
+      <div style="display:flex;gap:5px;margin-bottom:5px">
+        <input type="number" id="turnoutPct" min="0" max="100" step="0.1" placeholder="Turnout %"
+          style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:5px 6px;font-size:11px">
+        <input type="number" id="turnoutBooths" min="0" placeholder="Booths rptd"
+          style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:5px 6px;font-size:11px">
       </div>
-      <button class="ctrl-btn tl-danger" style="font-size:11px;padding:6px 10px" onclick="clearMemory()">
-        <span class="btn-icon">🗑</span> Clear stored memory
+      <button class="ctrl-btn primary" onclick="submitManualTurnout()" style="font-size:11px;padding:6px 10px">
+        <span class="btn-icon">✓</span> Submit
       </button>
+      <div id="turnoutManualStatus" style="font-size:10px;color:var(--green2);margin-top:4px;min-height:14px"></div>
     </div>
 
-    <div class="sidebar-section">
-      <div class="sid-label">Last run</div>
-      <div class="stat-mini">
-        <div class="stat-mini-val" style="font-size:13px;color:var(--text2)" id="lastRunTime">Never</div>
-        <div class="stat-mini-lbl">Last successful fetch</div>
+    <!-- TELEGRAM UPDATES -->
+    <div class="sidebar-section" id="briefingSection">
+      <div class="sid-label">Telegram</div>
+      <div style="display:flex;align-items:center;gap:7px;padding:7px 9px;background:var(--bg3);border:1px solid var(--border);border-radius:6px">
+        <span style="font-size:15px">📢</span>
+        <div>
+          <div style="font-size:11px;font-weight:600;color:var(--text)">WB Elections Summary</div>
+          <div style="font-size:9px;color:var(--text3);margin-top:1px">Telegram channel</div>
+        </div>
       </div>
     </div>
 
+    <!-- ARTICLE DIGEST -->
     <div class="sidebar-section">
-      <div id="connMode" style="font-size:10px;padding:5px 8px;border-radius:6px;font-family:'JetBrains Mono',monospace"></div>
+      <div class="sid-label">Article Digest</div>
+      <button class="ctrl-btn" onclick="openDigest()">
+        <span class="btn-icon">📚</span> Night Digest
+        <span class="digest-badge" id="digestUnreadBadge">0</span>
+      </button>
+      <div class="stat-mini">
+        <div class="stat-mini-val" id="digestDoneCount" style="color:var(--green)">—</div>
+        <div class="stat-mini-lbl">Articles digested · 7 days</div>
+      </div>
+      <div class="stat-mini" style="margin-top:4px">
+        <div class="stat-mini-val" id="digestPendingCount" style="color:var(--amber);font-size:16px">—</div>
+        <div class="stat-mini-lbl">Queued · processing</div>
+      </div>
     </div>
+
 
   </div>
 
   <!-- MAIN CONTENT -->
   <div class="content" id="mainContent">
+
+    <!-- MOBILE: sticky horizontal ticker strip (shown on mobile only) -->
+    <div id="mobTickerStrip">
+      <div class="mtk-label">LIVE</div>
+      <div class="mtk-track">
+        <div class="mtk-inner" id="mobTickerInner">Loading feeds…</div>
+      </div>
+    </div>
+
+    <!-- MOBILE: unified priority feed (shown on mobile only, replaces feeds-grid) -->
+    <div id="mobPriorityFeed">
+      <div class="mpf-header">
+        
+        <span style="flex:1">Priority Feed</span>
+        <span id="mobFeedCount" style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)"></span>
+      </div>
+      <div id="mobPriorityFeedBody"><div class="mpf-empty">Awaiting fetch cycle…</div></div>
+    </div>
 
     <div class="alert-banner" id="alertBanner">
       <span class="alert-icon">⚠</span>
@@ -424,44 +890,139 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
       </div>
     </div>
 
-    <!-- ANALYSIS PANEL - TOP -->
-    <div class="analysis-panel" id="analysisPanel">
-      <div class="analysis-header">
-        <span style="font-size:14px">🧠</span>
-        <span style="font-size:13px;font-weight:600;flex:1">Intelligence Summary</span>
-        <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)" id="analysisMeta">AI-powered · auto-updated</span>
+    <!-- TURNOUT ROW (Phase 3C — hidden until election day mode) -->
+    <div id="turnoutSection" style="display:none">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <span style="font-size:13px;font-weight:600;color:var(--text)">Voter Turnout — WB Phase 1</span>
+        <span id="turnoutLiveTag" style="font-size:9px;font-weight:700;letter-spacing:.07em;background:#dc2626;color:#fff;border-radius:4px;padding:2px 7px">LIVE</span>
+        <span id="turnoutUpdatedAt" style="font-size:10px;color:var(--text3);font-family:'JetBrains Mono',monospace;margin-left:4px"></span>
+        <button onclick="loadTurnout()" style="margin-left:auto;background:var(--bg3);border:1px solid var(--border);color:var(--text3);border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer" title="Refresh turnout data">↻ Refresh</button>
       </div>
-      <div class="refresh-progress"><div class="refresh-bar" id="progressBar" style="width:0%"></div></div>
-      <div class="analysis-body" id="analysisBody">
-        <div class="empty-state">
-          <span class="empty-icon">📡</span>
-          Press <strong>Fetch &amp; Analyse Now</strong> to run the first intelligence cycle.<br><br>
-          The dashboard will then auto-refresh every <strong>30 minutes</strong> (normal mode) or <strong>15 minutes</strong> on election day.
+      <div class="turnout-row" id="turnoutRow">
+        <!-- filled by renderTurnout() -->
+      </div>
+      <div class="turnout-chart-card" id="turnoutChartCard" style="display:none">
+        <div class="chart-title">Bankura Turnout % — election day trend</div>
+        <div class="turnout-chart-wrap">
+          <canvas id="chartTurnout"></canvas>
         </div>
-      </div>
-      <div class="analysis-footer">
-        <span id="analysisTimestamp">Not yet run</span>
-        <span id="analysisModel">local-llm</span>
       </div>
     </div>
 
-    <!-- POLITICAL FIGURES MONITOR -->
-    <div class="figure-monitor" id="figureMonitorPanel">
-      <div class="figure-monitor-header">
-        <span style="font-size:14px">🕵️</span>
-        <span style="font-size:13px;font-weight:600;flex:1">Political Figures Monitor</span>
-        <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)" id="figMonitorMeta">Bankura district — key actors</span>
+    <!-- MAP PANEL (Phase 4) -->
+    <div class="map-panel" id="mapPanel" style="display:none">
+      <div class="map-panel-header" onclick="toggleMapPanel()">
+        
+        <span class="map-panel-title">Bankura District — Assembly Constituency Map</span>
+        <span class="map-panel-meta" id="mapModeBadge">THREAT MODE</span>
+        <span class="map-panel-meta" id="mapLastUpdate" style="margin-left:8px"></span>
+        <button class="map-panel-toggle" id="mapToggleBtn" title="Collapse map">▴</button>
       </div>
-      <div class="figure-monitor-grid" id="figureMonitorGrid">
-        <div style="grid-column:1/-1;padding:20px;text-align:center;color:var(--text3);font-size:12px">Run a fetch cycle to scan for mentions in live feeds</div>
+      <div id="mapBody">
+        <div id="bankuraMap"></div>
       </div>
+    </div>
+
+    <!-- INTEL GRID: Bankura Intel | Statewide Intel | Wire Tracker -->
+    <div class="intel-grid">
+
+      <!-- LEFT: Bankura district intel -->
+      <div class="analysis-panel" id="analysisBankura">
+        <div class="analysis-header">
+          
+          <span style="font-size:13px;font-weight:600;flex:1">Bankura Intel</span>
+          <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)" id="analysisMeta">AI-powered · auto-updated</span>
+        </div>
+        <div class="refresh-progress"><div class="refresh-bar" id="progressBar" style="width:0%"></div></div>
+        <div class="analysis-body" id="analysisBankuraBody">
+          <div class="empty-state">
+            
+            Press <strong>Fetch &amp; Analyse Now</strong> to run the first intelligence cycle.<br><br>
+            Auto-refreshes every <strong>30 min</strong> (15 min on election day).
+          </div>
+        </div>
+        <button class="mob-analysis-expand" onclick="toggleAnalysisExpand('analysisBankuraBody',this)">▾ Show more</button>
+        <div class="analysis-footer">
+          <span id="analysisTimestamp">Not yet run</span>
+          <span id="analysisModel">local-llm</span>
+        </div>
+      </div>
+
+      <!-- CENTRE: Statewide WB intel -->
+      <div class="analysis-panel" id="analysisStatewide">
+        <div class="analysis-header">
+          
+          <span style="font-size:13px;font-weight:600;flex:1">Statewide Intel</span>
+          <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)">WB Phase 1 context</span>
+        </div>
+        <div class="analysis-body" id="analysisStatewideBody">
+          <div class="empty-state">
+            
+            Awaiting first fetch cycle.
+          </div>
+        </div>
+        <button class="mob-analysis-expand" onclick="toggleAnalysisExpand('analysisStatewideBody',this)">▾ Show more</button>
+      </div>
+
+      <!-- COL 3: ANI + PTI Wire Tracker -->
+        <div class="wire-panel" id="wirePanel">
+          <div class="wire-header">
+            
+            <span style="font-size:12px;font-weight:600;flex:1">Wire</span>
+            <span style="font-size:9px;font-family:'JetBrains Mono',monospace;color:var(--text3);margin-right:6px" id="wireMeta">ANI · PTI</span>
+            <button onclick="loadWire()" title="Refresh wire feed"
+              style="background:var(--bg3);border:1px solid var(--border);color:var(--text3);border-radius:4px;
+                     padding:2px 7px;font-size:11px;cursor:pointer;line-height:1.6"
+              onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text3)'">↻</button>
+          </div>
+          <div class="wire-viewport" id="wireViewport">
+            <div class="wire-inner" id="wireInner"></div>
+          </div>
+
+      </div>
+
+    </div>
+
+    <!-- MID ROW: Political Figures + Trend Sparkline -->
+    <div class="mid-row">
+
+      <div class="figure-monitor" id="figureMonitorPanel">
+        <div class="figure-monitor-header">
+          
+          <span style="font-size:13px;font-weight:600;flex:1">Political Figures Monitor — Bankura</span>
+          <span id="figNewBadge" style="display:none"></span>
+          <button id="figHideTop" onclick="toggleHiddenFigures()" style="display:none;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3);background:none;border:1px solid var(--border);border-radius:6px;padding:2px 8px;cursor:pointer;white-space:nowrap">▴ hide</button>
+          <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text3)" id="figMonitorMeta">Bankura district — key actors</span>
+        </div>
+        <div class="figure-monitor-grid" id="figureMonitorGrid">
+          <div style="grid-column:1/-1;padding:20px;text-align:center;color:var(--text3);font-size:12px">Run a fetch cycle to scan for mentions in live feeds</div>
+        </div>
+      </div>
+
+      <div class="trend-panel" id="trendPanel" style="display:none">
+        <div class="trend-header">
+          <span>Threat &amp; Signal Trend</span>
+          <span class="trend-meta" id="trendMeta">0 cycles stored</span>
+        </div>
+        <div class="trend-chart-wrap">
+          <canvas id="trendCanvas"></canvas>
+        </div>
+        <div class="trend-legend">
+          <span class="trend-l-low">Low threat</span>
+          <span class="trend-l-mod">Moderate</span>
+          <span class="trend-l-high">High / Critical</span>
+          <span class="trend-l-alert">High alerts (dashed)</span>
+          <span class="trend-l-viol">Violence reports (dotted)</span>
+        </div>
+      </div>
+
     </div>
 
     <!-- FEEDS GRID -->
     <div class="feeds-grid">
       <div class="feed-panel" id="feedBankura">
         <div class="feed-header">
-          <span class="feed-icon">📍</span>
+          
           <span class="feed-title">Bankura &amp; district feeds</span>
           <span class="feed-badge fb-local">LOCAL</span>
         </div>
@@ -470,8 +1031,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
       <div class="feed-panel" id="feedSurrounds">
         <div class="feed-header">
-          <span class="feed-icon">🗺</span>
-          <span class="feed-title">Surrounding districts</span>
+          <span class="feed-title">WB Statewide Context</span>
           <span class="feed-badge fb-local">REGIONAL</span>
         </div>
         <div class="feed-body" id="fbSurrounds"><div class="feed-loading">Awaiting fetch…</div></div>
@@ -479,7 +1039,6 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
       <div class="feed-panel" id="feedAlerts">
         <div class="feed-header">
-          <span class="feed-icon">⚠</span>
           <span class="feed-title">Alerts &amp; violations</span>
           <span class="feed-badge fb-alert">PRIORITY</span>
         </div>
@@ -488,7 +1047,6 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
       <div class="feed-panel" id="feedMCC">
         <div class="feed-header">
-          <span class="feed-icon">⚖</span>
           <span class="feed-title">MCC, security &amp; official updates</span>
           <span class="feed-badge fb-nat">OFFICIAL</span>
         </div>
@@ -497,7 +1055,6 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
       <div class="feed-panel" id="feedWB">
         <div class="feed-header">
-          <span class="feed-icon">📺</span>
           <span class="feed-title">West Bengal statewide</span>
           <span class="feed-badge fb-wb">WB</span>
         </div>
@@ -506,7 +1063,6 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
       <div class="feed-panel" id="feedParties">
         <div class="feed-header">
-          <span class="feed-icon">🏛</span>
           <span class="feed-title">Party statements — BJP · INC · CPI(M) · TMC</span>
           <span class="feed-badge fb-parties">PARTIES</span>
         </div>
@@ -515,7 +1071,6 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
       <div class="feed-panel full-width" id="feedBangla">
         <div class="feed-header">
-          <span class="feed-icon">📰</span>
           <span class="feed-title">Bengali media — Anandabazar · Eisamay · Zee 24 Ghanta · Bartaman (translated)</span>
           <span class="feed-badge fb-bangla">বাংলা</span>
         </div>
@@ -525,10 +1080,36 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
   
 <!-- TIMELINE MODAL -->
+<!-- ══════════════════ ARTICLE DIGEST MODAL ══════════════════ -->
+<div class="digest-modal-wrap" id="digestModal" onclick="if(event.target===this)closeDigest()">
+  <div class="digest-modal">
+    <div class="dm-header">
+      <span class="dm-title">Article Digest — MED/HIGH Priority</span>
+      <select class="dm-filter" id="dmDaysFilter" onchange="loadDigests()">
+        <option value="1">Today</option>
+        <option value="2">Last 2 days</option>
+        <option value="7" selected>Last 7 days</option>
+        <option value="30">Last 30 days</option>
+      </select>
+      <select class="dm-filter" id="dmSevFilter" onchange="loadDigests()">
+        <option value="all">All severity</option>
+        <option value="high">HIGH only</option>
+        <option value="medium">MED only</option>
+      </select>
+      <button class="dm-btn" id="dmNightBtn" onclick="toggleNightMode()">Night brief</button>
+      <button class="dm-btn" onclick="exportDigests()">⬇ Export .txt</button>
+      <button class="dm-btn" onclick="markAllRead()">✓ Mark all read</button>
+      <button class="dm-close" onclick="closeDigest()">✕</button>
+    </div>
+    <div class="dm-stats" id="dmStats">Loading…</div>
+    <div class="dm-body" id="dmBody"><div class="dm-empty">Loading digests…</div></div>
+  </div>
+</div>
+
 <div id="tlModal" class="tl-modal-overlay" style="display:none" onclick="if(event.target===this)closeTl()">
   <div class="tl-modal">
     <div class="tl-modal-header">
-      <span style="font-size:16px">📜</span>
+      
       <span class="tl-modal-title">Election Intelligence Timeline — Bankura 2026</span>
       <span id="tlEntryCount" style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text2)"></span>
     </div>
@@ -536,8 +1117,24 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
     <div class="tl-modal-footer">
       <button class="tl-btn tl-primary" onclick="exportJSON()">⬇ Export JSON</button>
       <button class="tl-btn tl-primary" onclick="exportCSV()">⬇ Export CSV</button>
-      <button class="tl-btn" onclick="openVideoExport()">🎬 Generate video</button>
+      <button class="tl-btn" onclick="openVideoExport()">Generate video</button>
       <button class="tl-btn" onclick="closeTl()" style="margin-left:auto">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- BRIEFING HISTORY MODAL (Phase 4B) -->
+<div id="briefingModal" class="tl-modal-overlay" style="display:none" onclick="if(event.target===this)closeBriefingHistory()">
+  <div class="tl-modal" style="max-width:680px">
+    <div class="tl-modal-header">
+      <span class="tl-modal-title">Daily Briefing History</span>
+      <span id="briefingHistoryCount" style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text2)"></span>
+    </div>
+    <div class="tl-modal-body" id="briefingHistoryBody" style="min-height:180px">
+      <div style="padding:24px;text-align:center;color:var(--text3)">Loading…</div>
+    </div>
+    <div class="tl-modal-footer">
+      <button class="tl-btn" onclick="closeBriefingHistory()" style="margin-left:auto">Close</button>
     </div>
   </div>
 </div>
@@ -546,7 +1143,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 <div id="videoModal" class="tl-modal-overlay" style="display:none" onclick="if(event.target===this)closeVideo()">
   <div class="tl-modal" style="max-width:600px">
     <div class="tl-modal-header">
-      <span style="font-size:16px">🎬</span>
+      
       <span class="tl-modal-title">Video Export — Election Timeline</span>
     </div>
     <div class="tl-modal-body" style="padding:20px">
@@ -600,12 +1197,19 @@ var chartThreat = null, chartTopics = null;
 var threatHistory = [], topicHistory = [];
 var currentParsed = null;  // stores last fetch result for chip expansion
 
+/* ─── PHASE 1 FEATURE FLAGS ─────────────────────────────────────────────
+   Set to false to instantly disable a feature without any other code change.
+   Each feature is completely self-contained — disabling one never affects
+   the core fetch/analysis pipeline.                                        */
+var FEATURE_ALERTS          = true;   // browser push notifications for critical keywords
+var FEATURE_SENTIMENT_TREND = true;   // threat/signal trend sparkline above feeds grid
+
 /* ─── TOPIC CHIP EXPAND / COLLAPSE ─── */
 // Mirrors Python _topic_counts() keyword sets.
 // Each entry: [keywords_to_match, panels_to_search]
 // panels_to_search: array of keys in parsed object
 var TOPIC_CHIP_CONFIG = [
-  {label:'Bankura violence',    kw:['bankura','violence','clash','attack','bomb'],   panels:['bankura','alerts']},
+  {label:'Bankura',             kw:['bankura','violence','clash','attack','bomb'],   panels:['bankura','alerts']},
   {label:'Bankura / Bishnupur', kw:['bankura','bishnupur'],                          panels:['bankura']},
   {label:'Purulia / Jhargram',  kw:['purulia','jhargram'],                           panels:['surrounds']},
   {label:'Birbhum / Bardhaman', kw:['birbhum','bardhaman'],                          panels:['surrounds']},
@@ -662,7 +1266,9 @@ function toggleChip(idx){
 
 /* ─── CHARTS INIT ─── */
 function initCharts(){
-  var ctxT = document.getElementById('chartThreat').getContext('2d');
+  var elT = document.getElementById('chartThreat');
+  if(!elT) return;   // canvas removed from layout — skip chart init
+  var ctxT = elT.getContext('2d');
   chartThreat = new Chart(ctxT,{
     type:'line',
     data:{
@@ -689,7 +1295,9 @@ function initCharts(){
     }
   });
 
-  var ctxB = document.getElementById('chartTopics').getContext('2d');
+  var elB = document.getElementById('chartTopics');
+  if(!elB) return;   // canvas removed — skip
+  var ctxB = elB.getContext('2d');
   chartTopics = new Chart(ctxB,{
     type:'bar',
     data:{
@@ -820,28 +1428,30 @@ function toggleMode(){
   isElectionMode = !isElectionMode;
   var badge = document.getElementById('modeBadge');
   var btn   = document.getElementById('modeToggleBtn');
-  var intD  = document.getElementById('intervalDisplay');
   if(isElectionMode){
     badge.textContent='ELECTION DAY'; badge.className='mode-badge mode-election';
     btn.innerHTML='🔵 Switch to Normal Mode';
-    intD.textContent='15 min'; progressDuration=REFRESH_ELECTION;
+    progressDuration=REFRESH_ELECTION;
   } else {
     badge.textContent='NORMAL MODE'; badge.className='mode-badge';
     btn.innerHTML='🚨 Election Day Mode';
-    intD.textContent='30 min'; progressDuration=REFRESH_NORMAL;
+    progressDuration=REFRESH_NORMAL;
   }
   scheduleNext();
 }
 
-function scheduleNext(){
+function scheduleNext(next_in_s){
   if(refreshTimer) clearTimeout(refreshTimer);
   if(countdownTimer) clearInterval(countdownTimer);
-  var interval = isElectionMode ? REFRESH_ELECTION : REFRESH_NORMAL;
-  nextRefreshAt  = Date.now() + interval;
-  progressStart  = Date.now();
-  progressDuration = interval;
-  refreshTimer   = setTimeout(function(){ runFetch(false); }, interval);
-  countdownTimer = setInterval(updateCountdown, 1000);
+  // Poll /api/latest every 60s (lightweight check — re-renders only if data changed)
+  var pollMs   = 60 * 1000;
+  // Countdown bar tracks server-side next refresh time
+  var serverMs = Math.max(pollMs, (next_in_s || _CENTRAL_FETCH_INTERVAL_MS/1000) * 1000);
+  nextRefreshAt    = Date.now() + serverMs;
+  progressStart    = Date.now();
+  progressDuration = serverMs;
+  refreshTimer     = setTimeout(function(){ runFetch(false); }, pollMs);
+  countdownTimer   = setInterval(updateCountdown, 1000);
   updateCountdown();
 }
 
@@ -850,8 +1460,7 @@ function updateCountdown(){
   var remaining = Math.max(0, nextRefreshAt - Date.now());
   var mins = Math.floor(remaining / 60000);
   var secs = Math.floor((remaining % 60000) / 1000);
-  document.getElementById('nextRefreshDisplay').textContent =
-    'Next: '+String(mins).padStart(2,'0')+':'+String(secs).padStart(2,'0');
+  // nextRefreshDisplay removed from UI
   if(progressStart){
     var pct = Math.min(100, ((Date.now()-progressStart)/progressDuration)*100);
     document.getElementById('progressBar').style.width = pct+'%';
@@ -866,28 +1475,13 @@ function setStatus(txt,color){
   dot.style.background = color ? color.replace('var(--','').replace(')','') : '#4ade80';
 }
 
-/* ─── API CALL (local proxy) ─── */
-async function callLLM(prompt, systemPrompt){
-  var headers = {'Content-Type':'application/json'};
-  var body = {
-    system: systemPrompt,
-    messages:[{role:'user',content:prompt}]
-  };
-  // Auto-detect port: when served by proxy use same origin; fallback to 5050 for file:// open
-  var endpoint = (location.protocol === 'http:' || location.protocol === 'https:')
-    ? location.origin + '/v1/messages'
-    : 'http://localhost:5050/v1/messages';
-  var ctrl = new AbortController();
-  var fetchTimer = setTimeout(function(){ ctrl.abort(); }, 660000); // 11 min (covers large models)
-  var resp;
-  try{
-    resp = await fetch(endpoint,{method:'POST',headers:headers,body:JSON.stringify(body),signal:ctrl.signal});
-  } finally { clearTimeout(fetchTimer); }
-
-  var data = await resp.json().catch(()=>({}));
-  if(!resp.ok||data.error){ throw new Error(data.error?.message||'Proxy error '+resp.status); }
-  return data;
-}
+/* ─── Central fetch architecture ───────────────────────────────────────────
+   All clients (prod/portal) read from /api/latest — instant DB read, no LLM.
+   Localhost dev can trigger a real LLM fetch via /api/fetch/trigger.
+   The proxy runs _do_fetch_cycle() every 15 min centrally.
+─────────────────────────────────────────────────────────────────────────── */
+var _lastFetchedAt = null;   // track last known server cycle timestamp (skip re-render if unchanged)
+var _isLocalhost   = (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
 
 function extractText(data){
   if(data._combinedText) return data._combinedText;
@@ -901,6 +1495,8 @@ function renderFeedItems(containerId, items){
   if(!items||!items.length){
     el.innerHTML='<div class="feed-loading">No items found this cycle.</div>'; return;
   }
+  // Cap at 4 items per panel to keep boxes compact
+  items = items.slice(0, 4);
   el.innerHTML = items.map(function(it){
     var sev = it.severity||'low';
     var sevClass = sev==='high'?'sev-high':sev==='medium'?'sev-med':'sev-low';
@@ -952,123 +1548,641 @@ function repairJSON(text){
 /* ─── MAIN FETCH CYCLE ─── */
 var _fetchInFlight = false;   // prevent overlapping requests
 
-async function runFetch(manual){
-  // Guard: skip if a fetch is already running (single LLM pipeline)
-  if(_fetchInFlight){
-    console.log('[runFetch] skipped — previous fetch still in progress');
+/* ── Normalise LLM field that may be string or array ── */
+function _toArr(v){ return Array.isArray(v) ? v : (v ? [v] : []); }
+
+/* ── Shared render: applies a parsed cycle to all panels ── */
+function _renderParsed(parsed, ts){
+  var m  = parsed.metrics||{};
+  document.getElementById('mTotalSignals').textContent = m.totalSignals||0;
+  document.getElementById('mHighAlert').textContent    = m.highAlerts||0;
+  document.getElementById('mViolence').textContent     = m.violenceReports||0;
+  document.getElementById('mTotalTrend').textContent   = ts;
+  var tl   = (m.threatLevel||'LOW').toUpperCase();
+  var tlEl = document.getElementById('mThreat');
+  tlEl.textContent = tl;
+  tlEl.style.color = tl==='CRITICAL'||tl==='HIGH' ? 'var(--red)' : tl==='MODERATE' ? 'var(--amber)' : 'var(--green)';
+  document.getElementById('mThreatTrend').textContent = ts;
+  alertCount += (m.highAlerts||0);
+
+  renderFeedItems('fbBankura',  parsed.bankura);
+  renderFeedItems('fbSurrounds',parsed.surrounds);
+  renderFeedItems('fbWB',       parsed.statewide);
+  renderFeedItems('fbParties',  parsed.parties);
+  renderFeedItems('fbAlerts',   parsed.alerts);
+  renderFeedItems('fbMCC',      parsed.official);
+  renderFeedItems('fbBangla',   parsed.bangla);
+
+  var an = parsed.analysis||{};
+  var bankuraHtml = '';
+  bankuraHtml += '<div class="section"><div class="sec-title">Situation headline</div><p class="highlight">'+(an.headline||'No headline')+'</p></div>';
+  bankuraHtml += '<div class="section"><div class="sec-title">Bankura district</div><p>'+(an.bankuraSituation||'—')+'</p></div>';
+  if(an.keyRisks&&an.keyRisks.length){
+    bankuraHtml+='<div class="section"><div class="sec-title">Key risks</div>';
+    _toArr(an.keyRisks).forEach(function(r){ bankuraHtml+='<p class="risk">▸ '+r+'</p>'; });
+    bankuraHtml+='</div>';
+  }
+  if(an.observerActions&&an.observerActions.length){
+    bankuraHtml+='<div class="section"><div class="sec-title">Observer actions</div>';
+    _toArr(an.observerActions).forEach(function(a){ bankuraHtml+='<p class="safe">✓ '+a+'</p>'; });
+    bankuraHtml+='</div>';
+  }
+  document.getElementById('analysisBankuraBody').innerHTML = bankuraHtml;
+  setTimeout(_matchWireHeight, 50);
+
+  var statewideHtml = '';
+  statewideHtml += '<div class="section"><div class="sec-title">WB Statewide Context</div><p>'+(an.statewideContext||an.surroundingSituation||'—')+'</p></div>';
+  if(an.partyPositions){
+    statewideHtml += '<div class="section"><div class="sec-title">Party positions &amp; allegations</div><p style="color:var(--purple)">'+(an.partyPositions||'—')+'</p></div>';
+  }
+  statewideHtml+='<div class="section"><div class="sec-title">Disinfo watch</div><p>'+(an.disinfoAlerts||'None detected')+'</p></div>';
+  statewideHtml+='<div class="section"><div class="sec-title">Overall assessment</div><p>'+(an.overallAssessment||'—')+'</p></div>';
+  document.getElementById('analysisStatewideBody').innerHTML = statewideHtml;
+  document.getElementById('analysisTimestamp').textContent = 'Updated: '+ts;
+
+  if(tl!=='LOW'){
+    document.getElementById('alertBanner').classList.add('show');
+    document.getElementById('alertBannerText').textContent = '⚠️ '+(an.headline||'High-priority situation')+' — See analysis below.';
+  } else {
+    document.getElementById('alertBanner').classList.remove('show');
+  }
+  if(parsed.topicCounts){
+    parsed.topicCounts.forEach(function(cnt,i){ var el=document.getElementById('cnt-'+i); if(el) el.textContent=cnt||0; });
+  }
+  updateCharts(m, parsed.topicCounts);
+  updateDistrictMap(an);
+  var tickerItems = (parsed.alerts||[]).concat(parsed.bankura||[]);
+  updateTicker(tickerItems);
+  updateMobTicker(tickerItems);
+  buildMobileFeed(parsed);
+  renderFigureMonitor(parsed.figureMentions);
+  setTimeout(loadFiguresNews, 100);
+  showContextImages(tl);
+  if(FEATURE_ALERTS) checkAlerts(parsed);
+  if(FEATURE_SENTIMENT_TREND){ saveTrendPoint(ts, parsed); renderTrendChart(); }
+  var _lrt = document.getElementById('lastRunTime'); if(_lrt) _lrt.textContent = ts;
+  currentParsed = parsed; window._lastParsed = parsed;
+  if(parsed.acMetrics){ updateMapLayer(parsed.acMetrics); _autoShowMap(parsed.acMetrics); }
+  if(isElectionMode && parsed.acMetrics){
+    var today = new Date().toISOString().slice(0,10);
+    if(today==='2026-04-23'){
+      fetch('/api/turnout').then(function(r){return r.json();}).then(function(d){
+        updateMapTurnout(d.districts||{}); updateMapModeBadge();
+      }).catch(function(){});
+    }
+  }
+}
+
+/* ── Apply /api/latest response: render if new data, schedule next poll ── */
+function _applyLatestResponse(data){
+  var parsed     = data.cycle;
+  var fetched_at = data.fetched_at || '';
+  var age_s      = data.age_seconds || 0;
+  var next_in    = data.next_fetch_in_seconds || _CENTRAL_FETCH_INTERVAL_MS / 1000;
+
+  if(fetched_at && fetched_at === _lastFetchedAt){
+    // Data unchanged — just update status and reschedule
+    _fetchInFlight = false;
+    _updateFetchStatus(age_s, next_in);
+    scheduleNext(next_in);
     return;
   }
+  _lastFetchedAt = fetched_at;
+  cycleCount++;
+  var ts = fetched_at
+    ? new Date(fetched_at).toLocaleString('en-IN')
+    : new Date().toLocaleString('en-IN');
+
+  _renderParsed(parsed, ts);
+  pushCycle(ts, parsed);
+  _fetchInFlight = false;
+  document.getElementById('progressBar').style.width = '100%';
+  _updateFetchStatus(age_s, next_in);
+  scheduleNext(next_in);
+}
+
+/* ── Status label showing refresh age + next refresh countdown ── */
+var _CENTRAL_FETCH_INTERVAL_MS = 15 * 60 * 1000;
+function _updateFetchStatus(age_s, next_in_s){
+  var ageMin  = Math.round(age_s / 60);
+  var nextMin = Math.ceil(next_in_s / 60);
+  var label   = ageMin < 1 ? 'LIVE' : 'Updated '+ageMin+'m ago';
+  var color   = ageMin < 5 ? '#4ade80' : ageMin < 20 ? '#fbbf24' : '#94a3b8';
+  setStatus(label, color);
+}
+
+/* ── Main fetch entry point ── */
+async function runFetch(manual){
+  if(_fetchInFlight){ console.log('[runFetch] skipped — in progress'); return; }
   _fetchInFlight = true;
 
-  setStatus('FETCHING RSS…','#fbbf24');
-  document.getElementById('progressBar').style.width='10%';
-  cycleCount++;
-  document.getElementById('cycleCount').textContent = cycleCount;
-  var now = new Date();
-  var ts  = now.toLocaleString('en-IN');
-
-  var system = `Election intelligence analyst. Bankura district observer, WB 2026 Assembly Election. Phase 1: 23 April 2026. Current time: ${ts}.`;
-  var prompt = `Analyse the WB election situation for the Bankura observer. Current time: ${ts}.`;
-
-  try{
-    var data   = await callLLM(prompt, system);
-    setStatus('ANALYSING…','#38bdf8');
-    document.getElementById('progressBar').style.width='65%';
-    var text   = extractText(data);
-    var parsed = repairJSON(text);
-    if(!parsed) throw new Error('JSON parse failed. Snippet: '+text.replace(/\n/g,' ').substring(0,300));
-
-    var m = parsed.metrics||{};
-    document.getElementById('mTotalSignals').textContent = m.totalSignals||0;
-    document.getElementById('mHighAlert').textContent    = m.highAlerts||0;
-    document.getElementById('mViolence').textContent     = m.violenceReports||0;
-    document.getElementById('mTotalTrend').textContent   = ts;
-    var tl   = (m.threatLevel||'LOW').toUpperCase();
-    var tlEl = document.getElementById('mThreat');
-    tlEl.textContent  = tl;
-    tlEl.style.color  = tl==='CRITICAL'||tl==='HIGH' ? 'var(--red)' : tl==='MODERATE' ? 'var(--amber)' : 'var(--green)';
-    document.getElementById('mThreatTrend').textContent = ts;
-
-    alertCount += (m.highAlerts||0);
-    document.getElementById('alertCount').textContent = alertCount;
-
-    renderFeedItems('fbBankura',  parsed.bankura);
-    renderFeedItems('fbSurrounds',parsed.surrounds);
-    renderFeedItems('fbWB',       parsed.statewide);
-    renderFeedItems('fbParties',  parsed.parties);
-    renderFeedItems('fbAlerts',   parsed.alerts);
-    renderFeedItems('fbMCC',      parsed.official);
-    renderFeedItems('fbBangla',   parsed.bangla);
-
-    var an = parsed.analysis||{};
-    var bodyHtml = '';
-    bodyHtml += '<div class="section"><div class="sec-title">Situation headline</div><p class="highlight">'+(an.headline||'No headline')+'</p></div>';
-    bodyHtml += '<div class="section"><div class="sec-title">Bankura district</div><p>'+(an.bankuraSituation||'—')+'</p></div>';
-    bodyHtml += '<div class="section"><div class="sec-title">Surrounding districts</div><p>'+(an.surroundingSituation||'—')+'</p></div>';
-    if(an.partyPositions){
-      bodyHtml += '<div class="section"><div class="sec-title">Party positions &amp; allegations</div><p style="color:var(--purple)">'+(an.partyPositions||'—')+'</p></div>';
+  // Dev localhost + manual button → trigger real LLM fetch (chunked, ~60-90s)
+  if(manual && _isLocalhost){
+    setStatus('FETCHING RSS…','#fbbf24');
+    document.getElementById('progressBar').style.width = '5%';
+    var ctrl = new AbortController();
+    var timer = setTimeout(function(){ ctrl.abort(); }, 660000);
+    try{
+      var resp = await fetch(window.location.origin+'/api/fetch/trigger',
+        {method:'POST', signal:ctrl.signal});
+      clearTimeout(timer);
+      // Chunked response — strip leading keepalive whitespace then parse JSON
+      var raw  = await resp.text();
+      var start = raw.indexOf('{');
+      var data  = JSON.parse(start >= 0 ? raw.slice(start) : raw);
+      if(!data.ok) throw new Error(data.error||'Trigger failed');
+      _applyLatestResponse(data);
+    }catch(err){
+      clearTimeout(timer);
+      _fetchInFlight = false;
+      var msg = err.name==='AbortError' ? 'Timed out — proxy may be busy' : err.message;
+      setStatus('ERROR','#f87171');
+      document.getElementById('analysisBankuraBody').innerHTML =
+        '<div class="empty-state" style="color:var(--red)"><span class="empty-icon">✕</span>'+
+        'Fetch failed: '+msg+'<br><br>'+
+        '<span style="color:var(--text3);font-size:12px">Check that proxy_local.py is running · Auto-retry next cycle</span></div>';
+      document.getElementById('analysisStatewideBody').innerHTML = '';
+      scheduleNext(_CENTRAL_FETCH_INTERVAL_MS / 1000);
     }
-    if(an.keyRisks&&an.keyRisks.length){
-      bodyHtml+='<div class="section"><div class="sec-title">Key risks</div>';
-      an.keyRisks.forEach(function(r){ bodyHtml+='<p class="risk">▸ '+r+'</p>'; });
-      bodyHtml+='</div>';
-    }
-    if(an.observerActions&&an.observerActions.length){
-      bodyHtml+='<div class="section"><div class="sec-title">Recommended observer actions</div>';
-      an.observerActions.forEach(function(a){ bodyHtml+='<p class="safe">✓ '+a+'</p>'; });
-      bodyHtml+='</div>';
-    }
-    bodyHtml+='<div class="section"><div class="sec-title">Disinfo watch</div><p>'+(an.disinfoAlerts||'None detected')+'</p></div>';
-    bodyHtml+='<div class="section"><div class="sec-title">Overall assessment</div><p>'+(an.overallAssessment||'—')+'</p></div>';
-    document.getElementById('analysisBody').innerHTML = bodyHtml;
-    document.getElementById('analysisTimestamp').textContent = 'Updated: '+ts;
-
-    if(tl!=='LOW'){
-      document.getElementById('alertBanner').classList.add('show');
-      document.getElementById('alertBannerText').textContent = '⚠️ '+( an.headline||'High-priority situation') + ' — See analysis below.';
-    } else {
-      document.getElementById('alertBanner').classList.remove('show');
-    }
-
-    if(parsed.topicCounts){
-      parsed.topicCounts.forEach(function(cnt,i){
-        var el=document.getElementById('cnt-'+i); if(el) el.textContent=cnt||0;
-      });
-    }
-
-    updateCharts(m, parsed.topicCounts);
-    updateDistrictMap(an);
-    updateTicker((parsed.alerts||[]).concat(parsed.bankura||[]));
-    renderFigureMonitor(parsed.figureMentions);
-    showContextImages(tl);
-
-    document.getElementById('lastRunTime').textContent = ts;
-    currentParsed = parsed;
-    pushCycle(ts, parsed);
-    setStatus('LIVE','#4ade80');
-    _fetchInFlight = false;
-    scheduleNext();
-
-  } catch(err){
-    _fetchInFlight = false;
-    var isAbort = err.name === 'AbortError';
-    var msg = isAbort
-      ? 'Request timed out after 5 min — proxy may be overloaded. Will retry.'
-      : err.message;
-    setStatus('ERROR','#f87171');
-    document.getElementById('analysisBody').innerHTML =
-      '<div class="empty-state" style="color:var(--red)"><span class="empty-icon">✕</span>'+
-      'Fetch failed: '+msg+'<br><br>'+
-      '<span style="color:var(--text3);font-size:12px">Check that proxy_local.py is running · Auto-retry next cycle</span></div>';
-    scheduleNext();
+    return;
   }
+
+  // All other clients (prod/portal/non-manual) → instant DB read
+  setStatus('REFRESHING…','#38bdf8');
+  try{
+    var r    = await fetch(window.location.origin+'/api/latest');
+    var data = await r.json();
+    if(!data.ok) throw new Error(data.error||'No data available yet');
+    _applyLatestResponse(data);
+  }catch(err){
+    _fetchInFlight = false;
+    setStatus('ERROR','#f87171');
+    document.getElementById('analysisBankuraBody').innerHTML =
+      '<div class="empty-state" style="color:var(--red)"><span class="empty-icon">✕</span>'+
+      'Refresh failed: '+err.message+'<br><br>'+
+      '<span style="color:var(--text3);font-size:12px">Check that proxy_local.py is running · Auto-retry next cycle</span></div>';
+    scheduleNext(_CENTRAL_FETCH_INTERVAL_MS / 1000);
+  }
+}
+
+/* ═══════ PHASE 1A — PUSH ALERT NOTIFICATIONS ═══════ */
+
+var _notifEnabled    = false;
+var _notifFiredCount = 0;
+var _alertedKeys     = new Set();  // dedup so same keyword doesn't fire every 30 min
+
+/* Keywords that trigger a browser push notification.
+   Each entry: key (unique dedup id), words (any of these in feed text triggers),
+   label (shown in notification body).                                          */
+var ALERT_KEYWORDS = [
+  {key:'booth',     words:['booth capture','booth jamming','booth looting','booth agent beaten'],
+                    label:'Booth capture / jamming'},
+  {key:'violence',  words:['violence','violent clash','bomb hurled','bombing','firing','gunshot',
+                            'stabbing','stabbed','attacked candidate','worker attacked'],
+                    label:'Election violence reported'},
+  {key:'arrest',    words:['arrested','detained','custody','in custody'],
+                    label:'Candidate / worker arrested'},
+  {key:'fir',       words:['fir filed','fir lodged','case filed','complaint filed'],
+                    label:'FIR / case filed'},
+  {key:'mcc',       words:['model code violation','mcc violation','mcc notice',
+                            'election commission notice','ec notice'],
+                    label:'MCC violation / EC notice'},
+  {key:'evm',       words:['evm tamper','evm seized','evm issue','vvpat problem','vvpat mismatch'],
+                    label:'EVM / VVPAT issue'},
+  {key:'sec144',    words:['section 144','prohibitory order','curfew imposed'],
+                    label:'Section 144 / prohibitory order'},
+  {key:'repoll',    words:['re-poll','repoll','re-election order','countermand'],
+                    label:'Re-poll ordered'},
+  {key:'forces',    words:['crpf deployed','central force deployed','bsf deployed',
+                            'paramilitary deployed','rapid action force'],
+                    label:'Central forces deployed'},
+  {key:'candidacy', words:['nomination rejected','nomination cancelled','candidate disqualified',
+                            'candidate withdrawal','withdrew nomination'],
+                    label:'Nomination issue / candidate withdrawal'},
+];
+
+function _notifBtnUpdate(){
+  var btn   = document.getElementById('notifToggleBtn');
+  var badge = document.getElementById('notifStatusBadge');
+  if(!btn || !badge) return;
+  var perm = (typeof Notification !== 'undefined') ? Notification.permission : 'unsupported';
+  if(perm === 'unsupported'){
+    btn.innerHTML = '<span class="btn-icon">🔕</span> Not supported'; btn.disabled = true;
+    badge.textContent = 'N/A'; badge.className = 'notif-status blocked';
+  } else if(perm === 'denied'){
+    btn.innerHTML = '<span class="btn-icon">🔕</span> Blocked by browser'; btn.disabled = true;
+    badge.textContent = 'BLOCKED'; badge.className = 'notif-status blocked';
+  } else if(_notifEnabled && perm === 'granted'){
+    btn.innerHTML = '<span class="btn-icon">🔕</span> Disable alerts';
+    badge.textContent = 'ON'; badge.className = 'notif-status on';
+  } else {
+    btn.innerHTML = '<span class="btn-icon">🔔</span> Enable push alerts';
+    badge.textContent = 'OFF'; badge.className = 'notif-status off';
+  }
+}
+
+function toggleNotifications(){
+  if(typeof Notification === 'undefined'){ alert('Browser notifications not supported.'); return; }
+  if(Notification.permission === 'denied'){
+    alert('Notifications are blocked for this page.\n\nTo enable:\n• Chrome/Edge: click the 🔒 lock icon in the address bar → Notifications → Allow\n• Safari: Safari menu → Settings for this website → Notifications → Allow');
+    return;
+  }
+  if(!_notifEnabled){
+    Notification.requestPermission().then(function(result){
+      if(result === 'granted'){
+        _notifEnabled = true;
+        new Notification('WB Election Intel — Alerts active', {
+          body: 'You will receive push notifications for booth capture, MCC violations, arrests, violence, and other critical election events — even when this tab is in the background.',
+          tag:  'wb-election-init'
+        });
+      }
+      _notifBtnUpdate();
+    });
+  } else {
+    _notifEnabled = false;
+    _notifBtnUpdate();
+  }
+}
+
+function checkAlerts(parsed){
+  if(!FEATURE_ALERTS || !_notifEnabled) return;
+  if(typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+
+  /* Collect all text from every feed panel + analysis summary */
+  var texts = [];
+  ['bankura','surrounds','statewide','alerts','official','parties','bangla'].forEach(function(k){
+    (parsed[k]||[]).forEach(function(item){
+      texts.push((item.headline||'')+' '+(item.summary||''));
+    });
+  });
+  texts.push(JSON.stringify(parsed.analysis||{}));
+  var full = texts.join(' ').toLowerCase();
+
+  /* Match against keyword config */
+  var fired = [];
+  ALERT_KEYWORDS.forEach(function(def){
+    if(_alertedKeys.has(def.key)) return;
+    if(def.words.some(function(w){ return full.includes(w.toLowerCase()); })){
+      fired.push(def); _alertedKeys.add(def.key);
+    }
+  });
+
+  /* Always alert on HIGH / CRITICAL threat level */
+  var tl = ((parsed.metrics||{}).threatLevel||'LOW').toUpperCase();
+  if((tl==='HIGH'||tl==='CRITICAL') && !_alertedKeys.has('threat-level')){
+    fired.push({key:'threat-level', label:'Threat level is '+tl}); _alertedKeys.add('threat-level');
+  }
+
+  if(!fired.length) return;
+
+  _notifFiredCount += fired.length;
+  document.getElementById('notifFiredCount').textContent = _notifFiredCount;
+
+  var headline = (parsed.analysis||{}).headline || '';
+  var body     = fired.map(function(f){ return '▸ '+f.label; }).join('\n');
+  if(headline) body += '\n\n'+headline;
+
+  new Notification('⚠️ WB Election Intel — '+fired[0].label, {
+    body:               body,
+    tag:                'wb-election-alert',   /* collapses into one notification (no spam) */
+    requireInteraction: true                   /* stays on screen until dismissed */
+  });
+}
+
+/* Reset dedup set every 2 hours so same keyword can re-fire in a new session block */
+setInterval(function(){ _alertedKeys.clear(); }, 2 * 60 * 60 * 1000);
+
+/* Init button state on load; hide entire sidebar section if feature is off */
+document.addEventListener('DOMContentLoaded', function(){
+  if(!FEATURE_ALERTS){
+    var ns = document.getElementById('notifSection');
+    if(ns) ns.style.display = 'none';
+    return;   // no point updating button state if section is hidden
+  }
+  _notifBtnUpdate();
+});
+
+
+/* ═══════ PHASE 1B — THREAT & SIGNAL TREND SPARKLINE ═══════ */
+
+var TREND_KEY    = 'wb_election_intel_trend_2026';
+var _trendChart  = null;
+
+function _loadTrend(){ try{ return JSON.parse(localStorage.getItem(TREND_KEY)||'[]'); }catch(e){ return []; } }
+function _saveTrend(arr){ try{ localStorage.setItem(TREND_KEY,JSON.stringify(arr)); }catch(e){} }  // no cap — keep all cycles
+
+function saveTrendPoint(ts, parsed){
+  if(!FEATURE_SENTIMENT_TREND) return;
+  var m = parsed.metrics || {};
+  var arr = _loadTrend();
+  arr.push({
+    ts:              ts,
+    iso:             new Date().toISOString(),
+    threatLevel:     (m.threatLevel||'LOW').toUpperCase(),
+    totalSignals:    m.totalSignals     || 0,
+    highAlerts:      m.highAlerts       || 0,
+    violenceReports: m.violenceReports  || 0,
+  });
+  _saveTrend(arr);
+}
+
+/* Recalibrate historical CRITICAL points inflated by old article-count logic.
+   Before 2026-04-03T19:13 UTC, violenceReports counted raw article mentions,
+   so 9 Malda articles → viol=13 → false CRITICAL.
+   After the fix, violenceReports counts distinct (location, violence_type) incidents.
+   Rule: CRITICAL before the cutoff → HIGH; CRITICAL after but viol<5 & high<8 → HIGH. */
+var _TREND_FIX_CUTOFF = '2026-04-03T19:13:00';
+function _recalibrateTrend(arr){
+  var changed = false;
+  var out = arr.map(function(p){
+    if(p.threatLevel !== 'CRITICAL') return p;
+    var preFix = p.iso && p.iso < _TREND_FIX_CUTOFF;
+    var lowCount = (p.violenceReports||0) < 5 && (p.highAlerts||0) < 8;
+    if(preFix || lowCount){
+      changed = true;
+      return Object.assign({}, p, {threatLevel:'HIGH'});
+    }
+    return p;
+  });
+  if(changed) _saveTrend(out);
+  return out;
+}
+
+function renderTrendChart(){
+  if(!FEATURE_SENTIMENT_TREND) return;
+  var arr   = _recalibrateTrend(_loadTrend());
+  var panel = document.getElementById('trendPanel');
+  if(!panel) return;
+  if(!arr.length){ panel.style.display='none'; return; }
+  panel.style.display = '';
+
+  /* On mobile: subsample to at most 48 evenly-spaced points so the X axis
+     doesn't cramp with a dense span of March→April date labels.
+     48 pts ≈ 12 h of 15-min cycles — enough to show meaningful trend shape. */
+  var isMob = window.innerWidth <= 768;
+  var MOB_TREND_MAX = 48;
+  if(isMob && arr.length > MOB_TREND_MAX){
+    var step = Math.ceil(arr.length / MOB_TREND_MAX);
+    var thinned = [];
+    for(var _i = 0; _i < arr.length; _i += step) thinned.push(arr[_i]);
+    // Always keep the very last point so the live dot is current
+    if(thinned[thinned.length-1] !== arr[arr.length-1]) thinned.push(arr[arr.length-1]);
+    arr = thinned;
+  }
+
+  var meta = document.getElementById('trendMeta');
+  if(meta) meta.textContent = arr.length+' cycle'+(arr.length!==1?'s':'')+' stored';
+
+  var tlMap = {LOW:1, MODERATE:2, HIGH:3, CRITICAL:4};
+
+  /* ── Smart X labels: HH:MM within one day; date at day boundary when multi-day ── */
+  var multiDay = (function(){
+    if(arr.length < 2) return false;
+    var first = arr[0].iso  ? new Date(arr[0].iso)  : null;
+    var last  = arr[arr.length-1].iso ? new Date(arr[arr.length-1].iso) : null;
+    return first && last && (first.toDateString() !== last.toDateString());
+  })();
+
+  /* Full ISO timestamp stored per point for tooltip even in time-only mode */
+  var tooltipLabels = arr.map(function(p){
+    if(p.iso){ var d=new Date(p.iso); return d.toLocaleDateString('en-IN',{day:'numeric',month:'short'})+' '+d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true}); }
+    return p.ts||'';
+  });
+
+  var labels = arr.map(function(p, i){
+    if(!p.iso){
+      var m = p.ts ? p.ts.match(/(\d+:\d+)/) : null; return m ? m[1] : (p.ts||'').slice(0,5);
+    }
+    var d = new Date(p.iso);
+    if(!multiDay){
+      return d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true});
+    }
+    /* Multi-day: show "DD MMM" only at first point of each calendar day, blank otherwise */
+    if(i===0) return d.toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+    var prev = arr[i-1].iso ? new Date(arr[i-1].iso) : null;
+    if(!prev || prev.toDateString()!==d.toDateString())
+      return d.toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+    return '';
+  });
+
+  var tlVals    = arr.map(function(p){ return tlMap[p.threatLevel]||1; });
+  var alertVals = arr.map(function(p){ return p.highAlerts||0; });
+  var violVals  = arr.map(function(p){ return p.violenceReports||0; });
+
+  /* Sparse labels: show only start, mid, and end — everything else blank.
+     Compute dates directly from arr[] (not from `labels` which is already
+     sparse — day-boundary-only — so labels[midIdx] and labels[lastIdx]
+     are often '' causing only the first label to appear). */
+  function _ptLabel(p){
+    if(!p || !p.iso) return p ? (p.ts||'') : '';
+    var d = new Date(p.iso);
+    return multiDay
+      ? d.toLocaleDateString('en-IN',{day:'numeric',month:'short'})
+      : d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true});
+  }
+  var sparseLabels = arr.map(function(){ return ''; });
+  var lastIdx = arr.length - 1;
+  var midIdx  = Math.round(lastIdx / 2);
+  sparseLabels[0]       = _ptLabel(arr[0]);
+  sparseLabels[midIdx]  = _ptLabel(arr[midIdx]);
+  sparseLabels[lastIdx] = _ptLabel(arr[lastIdx]);
+
+  /* Pad 3 null slots at the end so the line ends before the right edge */
+  var TAIL = 3;
+  var pLabels = sparseLabels.concat(['','','']);
+  var pTl     = tlVals.concat([null,null,null]);
+  var pAlert  = alertVals.concat([null,null,null]);
+  var pViol   = violVals.concat([null,null,null]);
+
+  var canvas = document.getElementById('trendCanvas');
+  if(!canvas) return;
+
+  /* Destroy & recreate when multi-day status flips (label format changes) */
+  var wasMultiDay = _trendChart && _trendChart._multiDay;
+  if(_trendChart && wasMultiDay === multiDay){
+    _trendChart.data.labels                 = pLabels;
+    _trendChart.data.datasets[0].data       = pTl;
+    _trendChart.data.datasets[1].data       = pAlert;
+    _trendChart.data.datasets[2].data       = pViol;
+    _trendChart._tooltipLabels              = tooltipLabels;
+    _trendChart.update('none');
+    setTimeout(_placeTrendDot, 0);
+    return;
+  }
+  if(_trendChart){ _trendChart.destroy(); _trendChart = null; }
+
+  /* autoSkip:false — labels array is already sparse (only start/mid/end non-empty) */
+  var xTickCfg = { autoSkip:false, font:{size:9}, color:'#64748b', maxRotation:0 };
+
+  _trendChart = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: pLabels,
+      datasets: [
+        { label:'Threat level',    data:pTl,       yAxisID:'yT',
+          borderColor:'#2563eb',   backgroundColor:'rgba(37,99,235,0.10)',
+          pointRadius:0, pointHoverRadius:5, pointHoverBackgroundColor:'#2563eb',
+          tension:0.45, cubicInterpolationMode:'monotone', fill:true, borderWidth:2 },
+        { label:'High alerts',     data:pAlert,    yAxisID:'yC',
+          borderColor:'#d97706',   backgroundColor:'transparent',
+          pointRadius:0, pointHoverRadius:4,
+          tension:0.45, cubicInterpolationMode:'monotone', borderDash:[5,3], borderWidth:1.5 },
+        { label:'Violence reports',data:pViol,     yAxisID:'yC',
+          borderColor:'#dc2626',   backgroundColor:'transparent',
+          pointRadius:0, pointHoverRadius:4,
+          tension:0.45, cubicInterpolationMode:'monotone', borderDash:[2,3], borderWidth:1.5 },
+      ]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:false,
+      interaction:{ mode:'index', intersect:false },
+      plugins:{
+        legend:{display:false},
+        tooltip:{
+          callbacks:{
+            title:function(c){ return tooltipLabels[c[0].dataIndex] || c[0].label; },
+            label:function(c){
+              if(c.datasetIndex===0){ return 'Threat: '+(['','LOW','MODERATE','HIGH','CRITICAL'][c.raw]||c.raw); }
+              return c.dataset.label+': '+c.raw;
+            }
+          }
+        }
+      },
+      scales:{
+        x:{ ticks:xTickCfg, grid:{color:'rgba(100,116,139,0.08)'} },
+        yT:{ type:'linear', position:'left', min:0, max:5,
+             ticks:{stepSize:1, font:{size:9}, color:'#64748b',
+                    callback:function(v){ return ['','L','M','H','C',''][v]||''; }},
+             grid:{color:'rgba(100,116,139,0.08)'} },
+        yC:{ type:'linear', position:'right', min:0,
+             ticks:{maxTicksLimit:4, font:{size:9}, color:'#64748b'},
+             grid:{display:false} }
+      }
+    }
+  });
+  _trendChart._multiDay       = multiDay;
+  _trendChart._tooltipLabels  = tooltipLabels;
+  setTimeout(_placeTrendDot, 0);  // wait one tick for Chart.js to finish layout
+}
+
+function _placeTrendDot(){
+  var chart = window._trendChart;
+  if(!chart) return;
+  var meta = chart.getDatasetMeta(0);
+  if(!meta || !meta.data.length) return;
+  /* Find last non-null point in dataset 0 */
+  var data = chart.data.datasets[0].data;
+  var lastIdx = -1;
+  for(var i = data.length - 1; i >= 0; i--){
+    if(data[i] !== null && data[i] !== undefined){ lastIdx = i; break; }
+  }
+  if(lastIdx < 0 || !meta.data[lastIdx]) return;
+  var pt  = meta.data[lastIdx];
+  var cvs = chart.canvas;
+  var dot = document.getElementById('trendBlinkDot');
+  if(!dot){
+    dot = document.createElement('span');
+    dot.id = 'trendBlinkDot';
+    cvs.parentElement.appendChild(dot);
+  }
+  dot.style.left    = (cvs.offsetLeft + pt.x) + 'px';
+  dot.style.top     = (cvs.offsetTop  + pt.y) + 'px';
+  dot.style.display = 'block';
+}
+
+/* On load: seed trend from DB then render — works for new visitors on any browser/domain */
+document.addEventListener('DOMContentLoaded', function(){
+  if(!FEATURE_SENTIMENT_TREND) return;
+  fetch(window.location.origin + '/api/trend?limit=200')
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      var pts = data.points || [];
+      if(pts.length){
+        // Merge DB points with any localStorage points newer than the latest DB point
+        var dbLatestIso = pts[pts.length - 1].iso || '';
+        var localNewer  = _loadTrend().filter(function(p){ return p.iso && p.iso > dbLatestIso; });
+        // Recalibrate before saving: CRITICAL points with <5 incidents were false positives
+        _saveTrend(_recalibrateTrend(pts.concat(localNewer)));
+      }
+      renderTrendChart();
+    })
+    .catch(function(){
+      // Proxy unreachable — fall back to whatever is in localStorage
+      renderTrendChart();
+    });
+});
+
+
+/* ═══════ LOAD LATEST CACHED CYCLE ═══════ */
+
+function applyParsedCycle(parsed, label){
+  if(!parsed) return;
+  var m  = parsed.metrics || {};
+  var an = parsed.analysis || {};
+  var ts = parsed._fetched_at
+    ? new Date(parsed._fetched_at).toLocaleString('en-IN')
+    : new Date().toLocaleString('en-IN');
+
+  document.getElementById('mTotalSignals').textContent = m.totalSignals || 0;
+  document.getElementById('mHighAlert').textContent    = m.highAlerts   || 0;
+  document.getElementById('mViolence').textContent     = m.violenceReports || 0;
+  document.getElementById('mTotalTrend').textContent   = ts;
+  var tl   = (m.threatLevel || 'LOW').toUpperCase();
+  var tlEl = document.getElementById('mThreat');
+  tlEl.textContent = tl;
+  tlEl.style.color = tl==='CRITICAL'||tl==='HIGH' ? 'var(--red)' : tl==='MODERATE' ? 'var(--amber)' : 'var(--green)';
+  document.getElementById('mThreatTrend').textContent = ts;
+
+  renderFeedItems('fbBankura',  parsed.bankura);
+  renderFeedItems('fbSurrounds',parsed.surrounds);
+  renderFeedItems('fbWB',       parsed.statewide);
+  renderFeedItems('fbParties',  parsed.parties);
+  renderFeedItems('fbAlerts',   parsed.alerts);
+  renderFeedItems('fbMCC',      parsed.official);
+  renderFeedItems('fbBangla',   parsed.bangla);
+
+  var bankuraHtml = '';
+  bankuraHtml += '<div class="section"><div class="sec-title">Situation headline</div><p class="highlight">'+(an.headline||'No headline')+'</p></div>';
+  bankuraHtml += '<div class="section"><div class="sec-title">Bankura district</div><p>'+(an.bankuraSituation||'—')+'</p></div>';
+  if(an.keyRisks&&an.keyRisks.length){
+    bankuraHtml+='<div class="section"><div class="sec-title">Key risks</div>';
+    an.keyRisks.forEach(function(r){ bankuraHtml+='<p class="risk">▸ '+r+'</p>'; });
+    bankuraHtml+='</div>';
+  }
+  if(an.observerActions&&an.observerActions.length){
+    bankuraHtml+='<div class="section"><div class="sec-title">Observer actions</div>';
+    an.observerActions.forEach(function(a){ bankuraHtml+='<p class="safe">✓ '+a+'</p>'; });
+    bankuraHtml+='</div>';
+  }
+  document.getElementById('analysisBankuraBody').innerHTML = bankuraHtml;
+  setTimeout(_matchWireHeight, 50);
+
+  var statewideHtml = '';
+  statewideHtml += '<div class="section"><div class="sec-title">WB Statewide Context</div><p>'+(an.statewideContext||an.surroundingSituation||'—')+'</p></div>';
+  if(an.partyPositions){
+    statewideHtml += '<div class="section"><div class="sec-title">Party positions &amp; allegations</div><p style="color:var(--purple)">'+(an.partyPositions||'—')+'</p></div>';
+  }
+  statewideHtml+='<div class="section"><div class="sec-title">Disinfo watch</div><p>'+(an.disinfoAlerts||'None detected')+'</p></div>';
+  statewideHtml+='<div class="section"><div class="sec-title">Overall assessment</div><p>'+(an.overallAssessment||'—')+'</p></div>';
+  document.getElementById('analysisStatewideBody').innerHTML = statewideHtml;
+  document.getElementById('analysisTimestamp').textContent = label + ts;
+
+  if(tl!=='LOW'){
+    document.getElementById('alertBanner').classList.add('show');
+    document.getElementById('alertBannerText').textContent = '⚠️ '+(an.headline||'High-priority situation')+' — See analysis below.';
+  }
+  setStatus('CACHED','#94a3b8');
 }
 
 /* ═══════ AUTO-START + VISIBILITY CATCH-UP ═══════ */
 
-// 1. Auto-start: run first fetch automatically when page loads
+// On load: fetch /api/latest — instant DB read, no LLM. Schedules 60s poll.
 document.addEventListener('DOMContentLoaded', function(){
-  setTimeout(function(){ runFetch(false); }, 1200); // slight delay so DOM settles
+  // Set button label: localhost dev gets LLM trigger, prod/portal gets DB refresh
+  var fetchLabel = document.getElementById('fetchNowLabel');
+  if(fetchLabel) fetchLabel.textContent = _isLocalhost ? 'Fetch & Analyse Now' : 'Refresh Data';
+  setStatus('LOADING…','#94a3b8');
+  setTimeout(function(){ runFetch(false); }, 800);
 });
 
 // 2. Page Visibility API — tab comes back from background/sleep
@@ -1144,16 +2258,23 @@ var FIGURES_META = {
 function renderFigureMonitor(figureMentions){
   var grid = document.getElementById('figureMonitorGrid');
   if(!grid || !figureMentions || !figureMentions.length) return;
+  // Suppress NEW badge for 15s after a fresh LLM cycle render so the
+  // subsequent loadFiguresNews re-sort doesn't fire spurious "new entrant" alerts
+  _figBadgeSuppressUntil = Date.now() + 15000;
 
   var totalMentions = figureMentions.reduce(function(s,f){ return s + (f.count||0); }, 0);
-  var meta = document.getElementById('figMonitorMeta');
-  if(meta) meta.textContent = totalMentions + ' mention' + (totalMentions!==1?'s':'') + ' this cycle';
+  var activeFigs    = figureMentions.filter(function(f){ return (f.count||0) > 0; }).length;
+  var metaEl = document.getElementById('figMonitorMeta');
+  if(metaEl) metaEl.textContent =
+    totalMentions + ' mention' + (totalMentions!==1?'s':'') +
+    ' · ' + activeFigs + ' of ' + figureMentions.length + ' figures active';
 
   var sevColor = {high:'var(--red2)', medium:'var(--amber)', low:'var(--text3)'};
   var sevBg    = {high:'rgba(220,38,38,0.12)', medium:'rgba(217,119,6,0.12)', low:'rgba(100,116,139,0.08)'};
 
-  grid.innerHTML = figureMentions.map(function(fig){
-    var pc = PARTY_COLOR[fig.party] || '';
+  /* ── Build a single figure card as HTML string ── */
+  function makeCard(fig){
+    var pc   = PARTY_COLOR[fig.party] || '';
     var meta = FIGURES_META[fig.name] || {};
     var links = '';
     if(meta.fb && meta.fb !== '#') links += '<a class="fig-link" href="'+meta.fb+'" target="_blank">FB</a>';
@@ -1175,7 +2296,7 @@ function renderFigureMonitor(figureMentions){
       }).join('');
     }
 
-    return '<div class="fig-card party-'+pc+'">' +
+    return '<div class="fig-card party-'+pc+'" data-name="'+fig.name.replace(/"/g,'&quot;')+'">' +
       '<div class="fig-name">' +
         '<span>'+fig.name+'</span>' +
         '<span class="fig-party fig-party-'+pc+'">'+fig.party+'</span>' +
@@ -1183,13 +2304,172 @@ function renderFigureMonitor(figureMentions){
       '<div class="fig-role">'+fig.role+'</div>' +
       (links ? '<div class="fig-links">'+links+'</div>' : '') +
       '<div class="fig-mentions">' +
-        '<div class="fig-mention-count'+(fig.count?'  has-mentions':'')+'">'+
+        '<div class="fig-mention-count'+(fig.count?' has-mentions':'')+'">'+
           (fig.count ? '● '+fig.count+' mention'+(fig.count!==1?'s':'') : '○ No mentions') +
         '</div>' +
         mentionsHtml +
       '</div>' +
     '</div>';
+  }
+
+  /* ── Sort: figures with mentions first (count desc), then alphabetical ── */
+  var sorted = figureMentions.slice().sort(function(a,b){
+    var ca = a.count||0, cb = b.count||0;
+    if(ca !== cb) return cb - ca;
+    return (a.name||'').localeCompare(b.name||'');
+  });
+
+  /* ── Render ALL cards; _applyFigureVisibility shows top 3 + toggle ── */
+  grid.innerHTML = sorted.map(function(fig){
+    return makeCard(fig);
   }).join('');
+
+  _applyFigureVisibility();  // show top 3 active, hide rest behind toggle
+}
+
+/* ── Show top 4 active figure cards; hide the rest ────────────────────────── */
+var _prevTopFigures   = [];   // names shown last time — used for blink detection
+var _figExpanded      = false; // tracks whether the "show more" section is open
+var _figBadgeSuppressUntil = 0; // suppress NEW badge during initial render+news-load window
+
+function _applyFigureVisibility(){
+  var grid = document.getElementById('figureMonitorGrid');
+  if(!grid) return;
+  var cards = Array.prototype.slice.call(grid.querySelectorAll('.fig-card'));
+  if(!cards.length) return;
+
+  // Score each card: LLM mentions (weight 2) + has news strip (weight 1)
+  cards.forEach(function(c){
+    var hasMention = !!c.querySelector('.fig-mention-count.has-mentions');
+    var hasNews    = !!c.querySelector('.fig-news-strip');
+    c._figScore = (hasMention ? 2 : 0) + (hasNews ? 1 : 0);
+  });
+
+  // Sort by score desc; ties retain existing order
+  cards.sort(function(a, b){ return b._figScore - a._figScore; });
+
+  // Top 3 always visible; if nothing has activity show top 2 as placeholder
+  var SHOW_MAX  = 3;
+  var hasActive = cards.some(function(c){ return c._figScore > 0; });
+  var showCount = hasActive ? SHOW_MAX : 2;
+
+  var topCards    = [];
+  var hiddenCards = [];
+  cards.forEach(function(c, i){
+    if(i < showCount){
+      topCards.push(c);
+    } else {
+      hiddenCards.push(c);
+    }
+  });
+
+  // Re-order DOM: top cards first (visible), then hidden cards
+  var nowTop = [];
+  topCards.forEach(function(c){
+    c.style.display = '';
+    nowTop.push(c.getAttribute('data-name') || '');
+    grid.appendChild(c);
+  });
+  hiddenCards.forEach(function(c){
+    c.style.display = _figExpanded ? '' : 'none';
+    grid.appendChild(c);
+  });
+
+  // Remove old toggle row, then re-insert if there are hidden cards
+  var oldToggle = document.getElementById('figToggleRow');
+  if(oldToggle) oldToggle.parentNode.removeChild(oldToggle);
+
+  if(hiddenCards.length){
+    var toggleRow = document.createElement('div');
+    toggleRow.id = 'figToggleRow';
+    toggleRow.style.cssText = 'grid-column:1/-1;margin-top:2px';
+
+    var hiddenActive = hiddenCards.filter(function(c){ return c._figScore > 0; }).length;
+    var labelOpen  = '▴ hide';
+    var labelClose = '+' + hiddenCards.length + ' more candidate' +
+                     (hiddenCards.length !== 1 ? 's' : '') +
+                     (hiddenActive ? ' (' + hiddenActive + ' active)' : ' — no recent mentions') + ' ▾';
+
+    toggleRow.innerHTML =
+      '<button class="ctrl-btn" id="figMoreBtn" style="font-size:11px;padding:5px 12px;' +
+      'color:var(--text3);border-style:' + (_figExpanded ? 'solid' : 'dashed') + '" ' +
+      'onclick="toggleHiddenFigures()">' +
+        '<span id="figMoreLabel">' + (_figExpanded ? labelOpen : labelClose) + '</span>' +
+      '</button>';
+
+    grid.appendChild(toggleRow);
+  }
+
+  // Update header meta
+  var activeCount = cards.filter(function(c){ return c._figScore > 0; }).length;
+  var metaEl = document.getElementById('figMonitorMeta');
+  if(metaEl){
+    metaEl.textContent = activeCount
+      ? activeCount + ' active · ' + cards.length + ' monitored'
+      : cards.length + ' candidates monitored';
+  }
+
+  // Blink badge if new names entered the top group — but only outside the suppress window
+  // and only if the top group was already established (not the first render)
+  if(Date.now() > _figBadgeSuppressUntil && _prevTopFigures.length){
+    var newNames = nowTop.filter(function(n){ return n && _prevTopFigures.indexOf(n) === -1; });
+    if(newNames.length){
+      // Show the highest-scoring new entrant (first in already-sorted list)
+      _showFigNewBadge(newNames[0]);
+    }
+  }
+  _prevTopFigures = nowTop;
+}
+
+function toggleHiddenFigures(){
+  _figExpanded = !_figExpanded;
+  var grid = document.getElementById('figureMonitorGrid');
+  if(!grid) return;
+  // Show/hide all .fig-card elements that are not in the top group
+  var cards   = Array.prototype.slice.call(grid.querySelectorAll('.fig-card'));
+  var topNames = _prevTopFigures;
+  var hiddenCount = 0;
+  cards.forEach(function(c){
+    var name = c.getAttribute('data-name') || '';
+    if(topNames.indexOf(name) === -1){
+      c.style.display = _figExpanded ? '' : 'none';
+      hiddenCount++;
+    }
+  });
+  // Update bottom toggle button appearance
+  var btn   = document.getElementById('figMoreBtn');
+  var label = document.getElementById('figMoreLabel');
+  if(btn)   btn.style.borderStyle = _figExpanded ? 'solid' : 'dashed';
+  if(label){
+    var hiddenActive = Array.prototype.filter.call(
+      grid.querySelectorAll('.fig-card'),
+      function(c){
+        return topNames.indexOf(c.getAttribute('data-name')||'') === -1 && c._figScore > 0;
+      }
+    ).length;
+    label.textContent = _figExpanded
+      ? '▴ hide'
+      : '+' + hiddenCount + ' more candidate' + (hiddenCount !== 1 ? 's' : '') +
+        (hiddenActive ? ' (' + hiddenActive + ' active)' : ' — no recent mentions') + ' ▾';
+  }
+  // Show/hide the header-level hide button
+  var hideTop = document.getElementById('figHideTop');
+  if(hideTop) hideTop.style.display = _figExpanded ? '' : 'none';
+}
+
+function _showFigNewBadge(name){
+  var badge = document.getElementById('figNewBadge');
+  if(!badge) return;
+  badge.className   = 'fig-new-badge';
+  badge.textContent = '● NEW · ' + (name || 'activity');
+  badge.style.display = '';
+  // Auto-dismiss after 30 s
+  clearTimeout(_showFigNewBadge._t);
+  _showFigNewBadge._t = setTimeout(function(){
+    badge.style.display = 'none';
+  }, 30000);
+  // Also dismiss on click
+  badge.onclick = function(){ badge.style.display = 'none'; };
 }
 
 /* ═══════ MEMORY SYSTEM ═══════ */
@@ -1213,48 +2493,79 @@ function clearMemory(){
 updateMemCount();
 
 /* ═══════ TIMELINE MODAL ═══════ */
-function openTimeline(){
-  var mem=loadMemory();
+function _renderTimeline(cycles){
   var body=document.getElementById('tlBody');
-  document.getElementById('tlEntryCount').textContent=mem.length+' cycle'+(mem.length!==1?'s':'')+' stored';
-  if(!mem.length){ body.innerHTML='<div class="tl-empty">No cycles yet. Run a fetch first.</div>'; }
-  else{
-    body.innerHTML=mem.slice().reverse().map(function(c){
-      var tl=(c.metrics.threatLevel||'LOW').toUpperCase();
-      var dc='tl-dot-'+tl.toLowerCase();
-      var an=c.analysis||{};
-      var risks=(an.keyRisks||[]).filter(Boolean).map(function(r){ return '<span class="risk">▸ '+r+'</span>'; }).join(' ');
-      var acts=(an.observerActions||[]).filter(Boolean).map(function(a){ return '<span class="safe">✓ '+a+'</span>'; }).join(' ');
-      function feedBlock(title,items){
-        if(!items||!items.length) return '';
-        return '<div class="tl-feed-block"><div class="tl-feed-title">'+title+'</div>'+
-          items.slice(0,3).map(function(it){
-            var sc=it.severity==='high'?'color:var(--red)':it.severity==='medium'?'color:var(--amber)':'';
-            var linkHtml=it.url?'<a href="'+it.url+'" target="_blank" style="color:var(--accent);font-size:10px;margin-left:4px">↗</a>':'';
-            return '<div class="tl-feed-item" style="'+sc+'">'+(it.summary||'')+linkHtml+'</div>';
-          }).join('')+'</div>';
-      }
-      return '<div class="tl-entry"><div class="tl-dot '+dc+'"></div>'+
-        '<div class="tl-ts">'+c.ts+'</div>'+
-        '<div class="tl-headline">'+(an.headline||'—')+'</div>'+
-        '<div class="tl-meta">'+
-          '<span class="tl-tag tl-tag-threat-'+tl+'">'+tl+'</span>'+
-          '<span class="tl-tag tl-tag-stat">Signals: '+(c.metrics.totalSignals||0)+'</span>'+
-          '<span class="tl-tag tl-tag-stat">Alerts: '+(c.metrics.highAlerts||0)+'</span>'+
-          '<span class="tl-tag tl-tag-stat">Violence: '+(c.metrics.violenceReports||0)+'</span>'+
-        '</div>'+
-        '<div class="tl-analysis-block">'+
-          '<div style="color:var(--text);margin-bottom:4px">'+(an.bankuraSituation||'—')+'</div>'+
-          (an.partyPositions?'<div style="color:#7c3aed;margin-top:4px">Parties: '+an.partyPositions+'</div>':'')+
-          (risks?'<div style="margin-top:6px">'+risks+'</div>':'')+
-          (acts?'<div style="margin-top:4px">'+acts+'</div>':'')+
-          (an.disinfoAlerts&&an.disinfoAlerts!=='None detected'?'<div style="color:var(--amber);margin-top:4px">⚠️ Disinfo: '+an.disinfoAlerts+'</div>':'')+
-        '</div>'+
-        '<div class="tl-feeds">'+feedBlock('Bankura',c.bankura)+feedBlock('Surrounds',c.surrounds)+feedBlock('Statewide',c.statewide)+feedBlock('Alerts',c.alerts)+'</div>'+
-      '</div>';
-    }).join('');
+  document.getElementById('tlEntryCount').textContent=cycles.length+' cycle'+(cycles.length!==1?'s':'')+' stored';
+  if(!cycles.length){ body.innerHTML='<div class="tl-empty">No cycles yet. Run a fetch first.</div>'; return; }
+  function feedBlock(title,items){
+    if(!items||!items.length) return '';
+    return '<div class="tl-feed-block"><div class="tl-feed-title">'+title+'</div>'+
+      items.slice(0,3).map(function(it){
+        var sc=it.severity==='high'?'color:var(--red)':it.severity==='medium'?'color:var(--amber)':'';
+        var linkHtml=it.url?'<a href="'+it.url+'" target="_blank" style="color:var(--accent);font-size:10px;margin-left:4px">↗</a>':'';
+        return '<div class="tl-feed-item" style="'+sc+'">'+(it.summary||'')+linkHtml+'</div>';
+      }).join('')+'</div>';
   }
+  body.innerHTML=cycles.map(function(c){
+    var tl=(c.metrics.threatLevel||'LOW').toUpperCase();
+    var dc='tl-dot-'+tl.toLowerCase();
+    var an=c.analysis||{};
+    var risks=(an.keyRisks||[]).filter(Boolean).map(function(r){ return '<span class="risk">▸ '+r+'</span>'; }).join(' ');
+    var acts=(an.observerActions||[]).filter(Boolean).map(function(a){ return '<span class="safe">✓ '+a+'</span>'; }).join(' ');
+    return '<div class="tl-entry"><div class="tl-dot '+dc+'"></div>'+
+      '<div class="tl-ts">'+c.ts+'</div>'+
+      '<div class="tl-headline">'+(an.headline||'—')+'</div>'+
+      '<div class="tl-meta">'+
+        '<span class="tl-tag tl-tag-threat-'+tl+'">'+tl+'</span>'+
+        '<span class="tl-tag tl-tag-stat">Signals: '+(c.metrics.totalSignals||0)+'</span>'+
+        '<span class="tl-tag tl-tag-stat">Alerts: '+(c.metrics.highAlerts||0)+'</span>'+
+        '<span class="tl-tag tl-tag-stat">Violence: '+(c.metrics.violenceReports||0)+'</span>'+
+      '</div>'+
+      '<div class="tl-analysis-block">'+
+        '<div style="color:var(--text);margin-bottom:4px">'+(an.bankuraSituation||'—')+'</div>'+
+        (an.partyPositions?'<div style="color:#7c3aed;margin-top:4px">Parties: '+an.partyPositions+'</div>':'')+
+        (risks?'<div style="margin-top:6px">'+risks+'</div>':'')+
+        (acts?'<div style="margin-top:4px">'+acts+'</div>':'')+
+        (an.disinfoAlerts&&an.disinfoAlerts!=='None detected'?'<div style="color:var(--amber);margin-top:4px">⚠️ Disinfo: '+an.disinfoAlerts+'</div>':'')+
+      '</div>'+
+      '<div class="tl-feeds">'+feedBlock('Bankura',c.bankura)+feedBlock('Surrounds',c.surrounds)+feedBlock('Statewide',c.statewide)+feedBlock('Alerts',c.alerts)+'</div>'+
+    '</div>';
+  }).join('');
+}
+
+function openTimeline(){
+  var body=document.getElementById('tlBody');
+  body.innerHTML='<div class="tl-empty">Loading…</div>';
   document.getElementById('tlModal').style.display='flex';
+  // Fetch from SQLite DB (works across all browsers/domains)
+  fetch(window.location.origin+'/api/cycles?limit=50')
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      var dbCycles=(data.cycles||[]).map(function(row){
+        try{
+          var p=JSON.parse(row.full_json||'{}');
+          // Normalise timestamp to display string
+          var ts=row.ts||'';
+          try{
+            var dt=new Date(ts);
+            if(!isNaN(dt)){
+              ts=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+
+                 ' '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false})+' IST';
+            }
+          }catch(e){}
+          return {ts:ts,metrics:p.metrics||{},bankura:p.bankura||[],surrounds:p.surrounds||[],
+                  statewide:p.statewide||[],alerts:p.alerts||[],official:p.official||[],analysis:p.analysis||{}};
+        }catch(e){ return null; }
+      }).filter(Boolean);
+      // Merge with any localStorage cycles not yet in DB (newest first)
+      var localCycles=loadMemory().slice().reverse();
+      var merged=dbCycles.length ? dbCycles : localCycles;
+      _renderTimeline(merged);
+    })
+    .catch(function(){
+      // Fallback to localStorage if proxy unreachable
+      _renderTimeline(loadMemory().slice().reverse());
+    });
 }
 function closeTl(){ document.getElementById('tlModal').style.display='none'; }
 
@@ -1273,7 +2584,7 @@ function exportCSV(){
     var an=c.analysis||{};
     rows.push([c.ts,c.metrics.threatLevel||'',c.metrics.totalSignals||0,c.metrics.highAlerts||0,c.metrics.violenceReports||0,
       (an.headline||'').replace(/,/g,';'),(an.bankuraSituation||'').replace(/,/g,';'),
-      (an.surroundingSituation||'').replace(/,/g,';'),(an.partyPositions||'').replace(/,/g,';'),
+      (an.statewideContext||an.surroundingSituation||'').replace(/,/g,';'),(an.partyPositions||'').replace(/,/g,';'),
       (an.keyRisks||[]).join(' | '),(an.observerActions||[]).join(' | '),
       (an.disinfoAlerts||'').replace(/,/g,';'),(an.overallAssessment||'').replace(/,/g,';')]);
   });
@@ -1347,7 +2658,7 @@ function generateVideoHTML(){
       '</div>'+
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'+
         '<div style="background:#0f172a;border-radius:6px;padding:10px;grid-column:1/-1"><div style="font-size:10px;color:#7c3aed;text-transform:uppercase;margin-bottom:4px">Party positions</div><div style="font-size:12px;color:#c4b5fd;line-height:1.5">'+(an.partyPositions||'No party data this cycle')+'</div></div>'+'<div style="background:#0f172a;border-radius:6px;padding:10px"><div style="font-size:10px;color:#475569;text-transform:uppercase;margin-bottom:4px">Bankura situation</div><div style="font-size:12px;color:#94a3b8;line-height:1.5">'+(an.bankuraSituation||'—')+'</div></div>'+
-        '<div style="background:#0f172a;border-radius:6px;padding:10px"><div style="font-size:10px;color:#475569;text-transform:uppercase;margin-bottom:4px">Surrounding districts</div><div style="font-size:12px;color:#94a3b8;line-height:1.5">'+(an.surroundingSituation||'—')+'</div></div>'+
+        '<div style="background:#0f172a;border-radius:6px;padding:10px"><div style="font-size:10px;color:#475569;text-transform:uppercase;margin-bottom:4px">WB Statewide Context</div><div style="font-size:12px;color:#94a3b8;line-height:1.5">'+(an.statewideContext||an.surroundingSituation||'—')+'</div></div>'+
         '<div style="background:#0f172a;border-radius:6px;padding:10px"><div style="font-size:10px;color:#475569;text-transform:uppercase;margin-bottom:4px">Key risks</div>'+risks+'</div>'+
         '<div style="background:#0f172a;border-radius:6px;padding:10px"><div style="font-size:10px;color:#475569;text-transform:uppercase;margin-bottom:4px">Observer actions</div>'+acts+'</div>'+
       '</div>'+feedsHtml+'</div>';
@@ -1384,27 +2695,646 @@ function generateVideoHTML(){
   alert('Slideshow downloaded!\n\nOpen in browser → use QuickTime or OBS to record.');
 }
 
-/* ─── CONNECTION BANNER ─── */
-(function(){
-  var el=document.getElementById('connMode');
-  if(!el) return;
-  var isFile=location.protocol==='file:';
-  var isLocal=location.hostname==='localhost'||location.hostname==='127.0.0.1';
-  if(isFile){
-    el.style.background='#fee2e2'; el.style.color='#991b1b'; el.style.border='1px solid #fca5a5';
-    el.textContent='⚠ file:// — run proxy_local.py';
-  } else if(isLocal){
-    el.style.background='#d1fae5'; el.style.color='#065f46'; el.style.border='1px solid #6ee7b7';
-    el.textContent='✓ local proxy active';
-  } else {
-    el.style.background='#fee2e2'; el.style.color='#991b1b'; el.style.border='1px solid #fca5a5';
-    el.textContent='⚠ run via localhost only';
-  }
-})();
 
 document.getElementById('progressBar').style.width='0%';
 initCharts();
 
+/* ═══════ PHASE 3C — ECI VOTER TURNOUT TRACKER ═══════ */
+
+var _chartTurnout = null;
+var _turnoutFetchTimer = null;
+var TURNOUT_REFRESH_MS = 10 * 60 * 1000;   // 10 min
+
+/* Show/hide the entire turnout section based on election day mode */
+function setTurnoutVisibility(show){
+  var sec  = document.getElementById('turnoutSection');
+  var msec = document.getElementById('turnoutManualSection');
+  if(sec)  sec.style.display  = show ? '' : 'none';
+  if(msec) msec.style.display = show ? '' : 'none';
+  if(show){
+    loadTurnout();
+    if(!_turnoutFetchTimer)
+      _turnoutFetchTimer = setInterval(loadTurnout, TURNOUT_REFRESH_MS);
+  } else {
+    if(_turnoutFetchTimer){ clearInterval(_turnoutFetchTimer); _turnoutFetchTimer = null; }
+  }
+}
+
+/* Fetch turnout data from proxy and render */
+function loadTurnout(){
+  fetch('/api/turnout')
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      renderTurnout(data.districts || {});
+      updateTurnoutChart(data.history || []);
+      var ua = document.getElementById('turnoutUpdatedAt');
+      if(ua) ua.textContent = 'Updated ' + new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+    })
+    .catch(function(e){ console.warn('[turnout] fetch failed', e); });
+}
+
+/* Render district cards */
+function renderTurnout(districts){
+  var row = document.getElementById('turnoutRow');
+  if(!row) return;
+  var districtOrder = ['Bankura','Purulia','Jhargram','Paschim Bardhaman','Paschim Medinipur','Birbhum'];
+  row.innerHTML = '';
+  var anyData = false;
+  districtOrder.forEach(function(d){
+    var info = districts[d] || null;
+    var pct  = info ? info.pct : null;
+    var src  = info ? (info.source || '') : '';
+    var cls  = pct === null ? '' : (pct >= 65 ? 'high' : pct >= 45 ? 'med' : 'low');
+    var barW = pct !== null ? Math.min(100, pct).toFixed(1) : 0;
+    var srcLabel = src === 'eci_scrape' ? 'ECI' : src === 'rss_parse' ? 'News' : src === 'manual' ? 'Manual' : src === 'db_cache' ? 'Cached' : '—';
+    var shortName = d.replace('Paschim ','P. ');
+    row.innerHTML += '<div class="turnout-card">'
+      + '<div class="turnout-district">' + shortName + '</div>'
+      + '<div class="turnout-pct ' + cls + '">' + (pct !== null ? pct.toFixed(1) + '%' : '—') + '</div>'
+      + '<div class="turnout-bar-wrap"><div class="turnout-bar" style="width:' + barW + '%"></div></div>'
+      + '<div class="turnout-src">' + srcLabel + '</div>'
+      + '</div>';
+    if(pct !== null) anyData = true;
+  });
+  /* Show LIVE tag only if data exists and today is election day */
+  var tag = document.getElementById('turnoutLiveTag');
+  if(tag){
+    var today = new Date().toISOString().slice(0,10);
+    tag.style.display = (anyData && today === '2026-04-23') ? '' : 'none';
+    if(today !== '2026-04-23' && anyData) tag.style.display = 'none';
+  }
+}
+
+/* Turnout trend chart (Bankura, election day only) */
+function updateTurnoutChart(history){
+  var card = document.getElementById('turnoutChartCard');
+  if(!history || history.length < 2){ if(card) card.style.display='none'; return; }
+  if(card) card.style.display = '';
+
+  var labels = history.map(function(h){
+    var d = new Date(h.ts);
+    return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+  });
+  var vals = history.map(function(h){ return h.pct; });
+
+  var el = document.getElementById('chartTurnout');
+  if(!el) return;
+
+  if(_chartTurnout){
+    _chartTurnout.data.labels = labels;
+    _chartTurnout.data.datasets[0].data = vals;
+    _chartTurnout.update('none');
+    return;
+  }
+  _chartTurnout = new Chart(el.getContext('2d'),{
+    type:'line',
+    data:{
+      labels: labels,
+      datasets:[{
+        label:'Bankura turnout %',
+        data: vals,
+        borderColor:'#3b82f6',
+        backgroundColor:'rgba(59,130,246,.12)',
+        borderWidth:2,
+        pointRadius:3,
+        fill:true,
+        tension:.3,
+      }]
+    },
+    options:{
+      animation:false,
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false}},
+      scales:{
+        x:{ticks:{font:{size:9},color:'#64748b',maxRotation:0,maxTicksLimit:8}},
+        y:{min:0,max:100,ticks:{font:{size:9},color:'#64748b',callback:function(v){return v+'%';}}},
+      }
+    }
+  });
+}
+
+/* Manual turnout submission */
+function submitManualTurnout(){
+  var district = document.getElementById('turnoutDistrict').value;
+  var pct      = parseFloat(document.getElementById('turnoutPct').value);
+  var booths   = parseInt(document.getElementById('turnoutBooths').value) || null;
+  var status   = document.getElementById('turnoutManualStatus');
+
+  if(!district || isNaN(pct) || pct < 0 || pct > 100){
+    if(status) status.textContent = 'Enter a valid district and % (0–100)';
+    return;
+  }
+  if(status) status.textContent = 'Saving…';
+  fetch('/api/turnout', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({district:district, pct:pct, booths_reported:booths})
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(data){
+    if(data.ok){
+      renderTurnout(data.districts || {});
+      if(status) status.textContent = '✓ Saved for ' + district;
+      document.getElementById('turnoutPct').value = '';
+      document.getElementById('turnoutBooths').value = '';
+      setTimeout(function(){ if(status) status.textContent=''; }, 3000);
+    } else {
+      if(status) status.textContent = 'Error: ' + (data.error || 'unknown');
+    }
+  })
+  .catch(function(e){
+    if(status) status.textContent = 'Network error';
+  });
+}
+
+/* Election day auto-activation — check date on page load */
+document.addEventListener('DOMContentLoaded', function(){
+  var today = new Date().toISOString().slice(0,10);
+  if(today === '2026-04-23'){
+    /* Auto-enable election day mode */
+    if(!isElectionMode) toggleMode();
+    setTurnoutVisibility(true);
+    console.log('[turnout] Election day detected — turnout tracker activated');
+  }
+});
+
+/* Hook into toggleMode so turnout section follows election mode */
+(function(){
+  var _origToggle = window.toggleMode;
+  window.toggleMode = function(){
+    _origToggle();
+    setTurnoutVisibility(isElectionMode);
+  };
+})();
+
+/* ═══════ PHASE 4B — DAILY BRIEFING ═══════ */
+
+var _briefingEnabled = false;
+
+/* Load config from proxy on page load */
+function loadBriefingConfig(){
+  fetch('/api/briefing/config')
+    .then(function(r){ return r.json(); })
+    .then(function(cfg){
+      _briefingEnabled = cfg.enabled === 'true';
+      _applyBriefingUI(cfg);
+    })
+    .catch(function(){});
+}
+
+function _applyBriefingUI(cfg){
+  var badge = document.getElementById('briefingStatusBadge');
+  var btn   = document.getElementById('briefingToggleBtn');
+  if(_briefingEnabled){
+    if(badge){ badge.textContent='ON'; badge.style.background='#22c55e22'; badge.style.color='#16a34a'; }
+    if(btn)  btn.innerHTML='<span class="btn-icon">📡</span> Disable daily briefing';
+  } else {
+    if(badge){ badge.textContent='OFF'; badge.style.background='#94a3b822'; badge.style.color='var(--text3)'; }
+    if(btn)  btn.innerHTML='<span class="btn-icon">📡</span> Enable daily briefing';
+  }
+  // Telegram fields — token is masked (***) from server; don't overwrite if user has typed one
+  var chatIdEl = document.getElementById('briefingTgChatId');
+  if(chatIdEl && cfg.telegram_chat_id) chatIdEl.value = cfg.telegram_chat_id;
+  // Token: show placeholder indicating it's set if server returns ***
+  var tokenEl = document.getElementById('briefingTgToken');
+  if(tokenEl && cfg.telegram_bot_token === '***') tokenEl.placeholder = '(token saved — re-enter to change)';
+  var schedEl = document.getElementById('briefingScheduleTime');
+  if(schedEl && cfg.schedule_time) schedEl.value = cfg.schedule_time;
+  var escH = document.getElementById('briefingEscHigh');
+  var escC = document.getElementById('briefingEscCritical');
+  if(escH) escH.checked = cfg.escalate_on_high !== 'false';
+  if(escC) escC.checked = cfg.escalate_on_critical !== 'false';
+  _refreshBriefingLastSent();
+}
+
+function toggleBriefing(){
+  _briefingEnabled = !_briefingEnabled;
+  var chatId = (document.getElementById('briefingTgChatId')||{}).value||'';
+  if(_briefingEnabled && !chatId.trim()){
+    _briefingEnabled = false;
+    var st = document.getElementById('briefingConfigStatus');
+    if(st){ st.style.color='var(--red2)'; st.textContent='Set bot token + chat ID before enabling.'; }
+    return;
+  }
+  saveBriefingConfig();
+}
+
+function saveBriefingConfig(){
+  var token    = (document.getElementById('briefingTgToken')||{}).value||'';
+  var chatId   = (document.getElementById('briefingTgChatId')||{}).value||'';
+  var sched    = (document.getElementById('briefingScheduleTime')||{}).value||'08:00';
+  var escH     = (document.getElementById('briefingEscHigh')||{}).checked !== false;
+  var escC     = (document.getElementById('briefingEscCritical')||{}).checked !== false;
+  var smsKey   = (document.getElementById('briefingSmsKey')||{}).value||'';
+  var smsPhone = (document.getElementById('briefingSmsPhone')||{}).value||'';
+  var status   = document.getElementById('briefingConfigStatus');
+
+  var payload = {
+    enabled:              _briefingEnabled ? 'true' : 'false',
+    telegram_chat_id:     chatId,
+    schedule_time:        sched,
+    escalate_on_high:     escH ? 'true' : 'false',
+    escalate_on_critical: escC ? 'true' : 'false',
+  };
+  // Only send token if user has typed a new one (not the masked placeholder)
+  if(token && token !== '***') payload.telegram_bot_token = token;
+  if(smsKey)   payload.sms_api_key = smsKey;
+  if(smsPhone) payload.sms_phone   = smsPhone;
+
+  if(status){ status.style.color='var(--text3)'; status.textContent='Saving…'; }
+
+  fetch('/api/briefing/config', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(payload),
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(data){
+    if(data.ok){
+      if(status){ status.style.color='var(--green2)'; status.textContent='✓ Saved'; }
+      loadBriefingConfig();
+      setTimeout(function(){ if(status) status.textContent=''; }, 3000);
+    } else {
+      if(status){ status.style.color='var(--red2)'; status.textContent=data.error||'Error'; }
+    }
+  })
+  .catch(function(){ if(status){ status.style.color='var(--red2)'; status.textContent='Network error'; } });
+}
+
+function sendBriefingNow(){
+  var status = document.getElementById('briefingConfigStatus');
+  if(status){ status.style.color='var(--text3)'; status.textContent='Sending…'; }
+  fetch('/api/briefing/send')
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      var msg = 'Telegram: ' + (data.tg||'—') + (data.sms && data.sms !== 'skip' ? ' · sms: '+data.sms : '');
+      if(data.tg === 'skip' && data.reason) msg += ' (' + data.reason + ')';
+      if(status){ status.style.color = data.tg==='ok' ? 'var(--green2)' : 'var(--amber)'; status.textContent=msg; }
+      _refreshBriefingLastSent();
+      setTimeout(function(){ if(status) status.textContent=''; }, 6000);
+    })
+    .catch(function(){ if(status){ status.style.color='var(--red2)'; status.textContent='Send failed'; } });
+}
+
+
+function detectTelegramChatId(){
+  var tokenEl  = document.getElementById('briefingTgToken');
+  var chatIdEl = document.getElementById('briefingTgChatId');
+  var stEl     = document.getElementById('briefingTgDetectStatus');
+  var token    = (tokenEl||{}).value||'';
+  if(stEl){ stEl.style.color='var(--text3)'; stEl.textContent='Detecting…'; }
+  var url = '/api/telegram/chatid' + (token && token !== '***' ? '?token=' + encodeURIComponent(token) : '');
+  fetch(url)
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if(data.error){
+        if(stEl){ stEl.style.color='var(--red2)'; stEl.textContent='Error: ' + data.error; }
+        return;
+      }
+      if(!data.chat_id){
+        if(stEl){ stEl.style.color='var(--amber)'; stEl.textContent=data.hint||'No messages found — send /start to your bot first'; }
+        return;
+      }
+      if(chatIdEl) chatIdEl.value = data.chat_id;
+      var label = data.chat_title ? data.chat_title + ' (' + data.chat_id + ')' : data.chat_id;
+      if(stEl){ stEl.style.color='var(--green2)'; stEl.textContent='✓ Detected: ' + label; }
+    })
+    .catch(function(e){
+      if(stEl){ stEl.style.color='var(--red2)'; stEl.textContent='Network error'; }
+    });
+}
+
+function _refreshBriefingLastSent(){
+  fetch('/api/briefing/history?limit=1')
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      var el = document.getElementById('briefingLastSent');
+      if(!el) return;
+      if(data.sends && data.sends.length){
+        var s = data.sends[0];
+        var d = new Date(s.sent_at);
+        var label = d.toLocaleDateString('en-IN',{day:'numeric',month:'short'}) + ' ' +
+                    d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+        var trig  = {scheduled:'scheduled',escalation:'escalation',manual:'manual'}[s.trigger]||s.trigger;
+        el.textContent = label + ' (' + trig + ')';
+      } else {
+        el.textContent = 'Never';
+      }
+    })
+    .catch(function(){});
+}
+
+/* Briefing history modal */
+function openBriefingHistory(){
+  document.getElementById('briefingModal').style.display='flex';
+  var body  = document.getElementById('briefingHistoryBody');
+  var count = document.getElementById('briefingHistoryCount');
+  body.innerHTML='<div style="padding:24px;text-align:center;color:var(--text3)">Loading…</div>';
+  fetch('/api/briefing/history?limit=20')
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      var sends = data.sends || [];
+      if(count) count.textContent = sends.length + ' send' + (sends.length!==1?'s':'');
+      if(!sends.length){
+        body.innerHTML='<div style="padding:24px;text-align:center;color:var(--text3)">No briefings sent yet.</div>';
+        return;
+      }
+      var tColors = {LOW:'#22c55e',MODERATE:'#f59e0b',HIGH:'#f97316',CRITICAL:'#dc2626'};
+      body.innerHTML = sends.map(function(s){
+        var d = new Date(s.sent_at);
+        var label = d.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'2-digit'}) + ' ' +
+                    d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+        var tc = tColors[s.threat_level]||'#64748b';
+        var ntfyBadge = s.ntfy_status==='ok'
+          ? '<span style="color:#22c55e;font-size:10px">✓ tg</span>'
+          : '<span style="color:#f97316;font-size:10px">✗ tg('+s.ntfy_status+')</span>';
+        var smsBadge = s.sms_status && s.sms_status!=='skip'
+          ? (s.sms_status==='ok'
+              ? '<span style="color:#22c55e;font-size:10px;margin-left:6px">✓ sms</span>'
+              : '<span style="color:#f97316;font-size:10px;margin-left:6px">✗ sms</span>')
+          : '';
+        var trigLabel = {scheduled:'🗓',escalation:'⚡',manual:'👤'}[s.trigger]||'📋';
+        return '<div style="padding:10px 14px;border-bottom:1px solid var(--border)">'
+          + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">'
+          + '<span style="font-size:11px;font-family:\'JetBrains Mono\',monospace;color:var(--text2)">' + label + '</span>'
+          + '<span style="font-size:10px;font-weight:700;color:'+tc+'">'+s.threat_level+'</span>'
+          + '<span style="font-size:11px" title="'+s.trigger+'">'+trigLabel+'</span>'
+          + ntfyBadge + smsBadge
+          + '</div>'
+          + '<div style="font-size:11px;color:var(--text2)">' + (s.headline||'—') + '</div>'
+          + '</div>';
+      }).join('');
+    })
+    .catch(function(){ body.innerHTML='<div style="padding:24px;text-align:center;color:var(--red2)">Failed to load history.</div>'; });
+}
+
+function closeBriefingHistory(){
+  document.getElementById('briefingModal').style.display='none';
+}
+
+/* Load briefing config on page load */
+document.addEventListener('DOMContentLoaded', loadBriefingConfig);
+
+
+/* ═══════ PHASE 4 — BANKURA AC MAP OVERLAY ═══════ */
+
+var _map          = null;
+var _mapGeoLayer  = null;
+var _mapCollapsed = true;   // starts minimised; auto-expands on AC threat
+var _mapGeoJSON   = null;   // cached GeoJSON
+
+/* Colour map: threat → fill colour */
+var _threatColor = {
+  CRITICAL: '#dc2626',
+  HIGH:     '#f97316',
+  MODERATE: '#f59e0b',
+  LOW:      '#22c55e',
+};
+var _threatOpacity = { CRITICAL:.75, HIGH:.6, MODERATE:.45, LOW:.2 };
+
+function initMap(){
+  if(_map) return;
+  var el = document.getElementById('bankuraMap');
+  if(!el) return;
+
+  _map = L.map('bankuraMap', {
+    zoomControl: true,
+    attributionControl: false,
+    scrollWheelZoom: true,
+  });
+
+  // CartoDB Positron tile layer — clean, minimal, works offline-friendly
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    maxZoom: 13,
+    subdomains: 'abcd',
+  }).addTo(_map);
+
+  // Attribution (compact)
+  L.control.attribution({position:'bottomleft', prefix:false})
+    .addAttribution('© OpenStreetMap · CartoDB · Datameet')
+    .addTo(_map);
+
+  // Legend
+  var legend = L.control({position:'bottomright'});
+  legend.onAdd = function(){
+    var div = L.DomUtil.create('div','map-legend');
+    div.innerHTML =
+      '<strong style="font-size:10px">Threat Level</strong><br>' +
+      ['CRITICAL','HIGH','MODERATE','LOW'].map(function(t){
+        return '<span class="map-legend-dot" style="background:'+_threatColor[t]+'"></span>'+t;
+      }).join('<br>');
+    return div;
+  };
+  legend.addTo(_map);
+
+  // Load GeoJSON
+  fetch('/geojson/bankura_acs.geojson')
+    .then(function(r){ return r.json(); })
+    .then(function(geo){
+      _mapGeoJSON = geo;
+      _mapGeoLayer = L.geoJSON(geo, {
+        style: _defaultACStyle,
+        onEachFeature: _onEachAC,
+      }).addTo(_map);
+      _map.fitBounds(_mapGeoLayer.getBounds(), {padding:[10,10]});
+      _addACLabels(geo);
+      console.log('[map] Bankura AC layer loaded');
+    })
+    .catch(function(e){ console.warn('[map] GeoJSON load failed', e); });
+}
+
+function _defaultACStyle(feature){
+  return {
+    fillColor:   _threatColor['LOW'],
+    fillOpacity: _threatOpacity['LOW'],
+    color:       '#64748b',
+    weight:      1.2,
+    opacity:     0.9,
+  };
+}
+
+function _onEachAC(feature, layer){
+  layer.on({
+    mouseover: function(e){
+      e.target.setStyle({weight:2.5, color:'#1d4ed8', fillOpacity: Math.min(1, (e.target.options.fillOpacity||.2)+.15)});
+    },
+    mouseout: function(e){
+      _mapGeoLayer.resetStyle(e.target);
+    },
+    click: function(e){
+      _showACPopup(feature.properties, e.target);
+    },
+  });
+}
+
+function _addACLabels(geo){
+  geo.features.forEach(function(ft){
+    var p   = ft.properties;
+    var lon = p.CENTER[0], lat = p.CENTER[1];
+    var lbl = p.DISPLAY_NAME + (p.CATEGORY ? '<br><span style="font-size:8px;opacity:.7">'+p.CATEGORY+'</span>' : '');
+    L.marker([lat, lon], {
+      icon: L.divIcon({
+        className: '',
+        html: '<div style="font-size:9px;font-weight:600;color:#1e293b;text-shadow:0 0 3px #fff,0 0 3px #fff;text-align:center;white-space:nowrap;pointer-events:none">'+lbl+'</div>',
+        iconAnchor: [30, 8],
+        iconSize:   [60, 16],
+      }),
+      interactive: false,
+    }).addTo(_map);
+  });
+}
+
+function updateMapLayer(acMetrics){
+  if(!_mapGeoLayer || !acMetrics) return;
+  _mapGeoLayer.eachLayer(function(layer){
+    var name    = layer.feature.properties.AC_NAME;
+    var metrics = acMetrics[name];
+    if(!metrics) return;
+    var threat  = metrics.threat || 'LOW';
+    layer.setStyle({
+      fillColor:   _threatColor[threat]  || _threatColor['LOW'],
+      fillOpacity: _threatOpacity[threat]|| _threatOpacity['LOW'],
+    });
+    // Store for mouseout reset
+    layer.options._baseFillColor   = _threatColor[threat];
+    layer.options._baseFillOpacity = _threatOpacity[threat];
+  });
+  var now = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+  var el  = document.getElementById('mapLastUpdate');
+  if(el) el.textContent = 'Updated ' + now;
+}
+
+function _showACPopup(props, layer){
+  var name    = props.AC_NAME;
+  var display = props.DISPLAY_NAME + (props.CATEGORY ? ' ' + props.CATEGORY : '');
+  var metrics = (window._lastParsed && window._lastParsed.acMetrics) ? window._lastParsed.acMetrics[name] : null;
+  var threat  = metrics ? metrics.threat : 'NO DATA';
+  var tColor  = _threatColor[threat] || '#64748b';
+  var high    = metrics ? metrics.high    : '—';
+  var med     = metrics ? metrics.medium  : '—';
+  var figs    = metrics ? metrics.figures : '—';
+
+  // Find matching figures for this AC
+  var figList = '';
+  if(window._lastParsed && window._lastParsed.figureMentions){
+    var acKw = name.replace(' (SC)','').replace(' (ST)','').toLowerCase();
+    window._lastParsed.figureMentions.forEach(function(f){
+      if(f.count > 0 && f.role.toLowerCase().indexOf(acKw) !== -1){
+        var partyColor = f.party === 'BJP' ? '#f97316' : f.party === 'TMC' ? '#22c55e' : '#ef4444';
+        figList += '<div style="font-size:11px;margin-top:3px"><span style="color:'+partyColor+';font-weight:600">'+f.party+'</span> '+f.name+' <span style="color:#94a3b8">('+f.count+' mentions)</span></div>';
+      }
+    });
+  }
+
+  var html = '<div class="ac-popup">'
+    + '<h4>'+display
+    + '<span class="threat-badge" style="background:'+tColor+'22;color:'+tColor+';border:1px solid '+tColor+'44">'+threat+'</span>'
+    + '</h4>'
+    + '<div class="stat-row">🔴 HIGH signals: <strong>'+high+'</strong> &nbsp;|&nbsp; 🟡 MEDIUM: <strong>'+med+'</strong></div>'
+    + '<div class="stat-row">👤 Figure mentions: <strong>'+figs+'</strong></div>'
+    + (figList ? '<div class="fig-row">'+figList+'</div>' : '')
+    + '</div>';
+
+  L.popup({maxWidth:260, className:'ac-popup-wrap'})
+    .setLatLng(layer.getBounds().getCenter())
+    .setContent(html)
+    .openOn(_map);
+}
+
+function toggleMapPanel(){
+  _mapCollapsed = !_mapCollapsed;
+  _applyMapCollapse();
+  localStorage.setItem('wb_map_collapsed', _mapCollapsed ? '1' : '0');
+}
+
+function _applyMapCollapse(){
+  var body = document.getElementById('mapBody');
+  var btn  = document.getElementById('mapToggleBtn');
+  if(body) body.style.display = _mapCollapsed ? 'none' : '';
+  if(btn)  btn.textContent    = _mapCollapsed ? '▾' : '▴';
+  if(!_mapCollapsed && _map) setTimeout(function(){ _map.invalidateSize(); }, 50);
+}
+
+/* Auto-expand map if any AC has MODERATE/HIGH/CRITICAL threat.
+   Only expands — never auto-collapses (user controls that). */
+function _autoShowMap(acMetrics){
+  if(!_mapCollapsed) return;   // already open
+  if(!acMetrics) return;
+  var elevated = Object.values(acMetrics).some(function(v){
+    return v.threat === 'MODERATE' || v.threat === 'HIGH' || v.threat === 'CRITICAL';
+  });
+  if(elevated){
+    _mapCollapsed = false;
+    _applyMapCollapse();
+    localStorage.setItem('wb_map_collapsed','0');
+    console.log('[map] Auto-expanded: AC threat detected');
+  }
+}
+
+/* Update map mode badge when election day mode toggled */
+function updateMapModeBadge(){
+  var badge = document.getElementById('mapModeBadge');
+  if(!badge) return;
+  var today = new Date().toISOString().slice(0,10);
+  if(isElectionMode && today === '2026-04-23'){
+    badge.textContent = 'TURNOUT MODE';
+    badge.style.color = '#22c55e';
+  } else {
+    badge.textContent = 'THREAT MODE';
+    badge.style.color = '';
+  }
+}
+
+/* Election day: overlay turnout % as fill gradient on the map */
+function updateMapTurnout(turnoutData){
+  if(!_mapGeoLayer || !turnoutData) return;
+  // Map district-level turnout to a blue gradient (no AC-level data yet)
+  // Bankura district turnout → all 12 AC polygons shaded uniformly
+  var bankuraPct = (turnoutData['Bankura'] && turnoutData['Bankura'].pct) || null;
+  if(!bankuraPct) return;
+
+  // Gradient: 0% = #94a3b8 (grey), 50% = #60a5fa (blue), 80%+ = #1d4ed8 (deep blue)
+  function pctToColor(pct){
+    if(pct >= 70) return '#1d4ed8';
+    if(pct >= 55) return '#3b82f6';
+    if(pct >= 40) return '#60a5fa';
+    return '#94a3b8';
+  }
+  _mapGeoLayer.eachLayer(function(layer){
+    layer.setStyle({
+      fillColor:   pctToColor(bankuraPct),
+      fillOpacity: 0.55,
+    });
+  });
+}
+
+/* Init map on page load — wait for Leaflet CDN script to finish loading */
+document.addEventListener('DOMContentLoaded', function(){
+  // Restore collapsed state from localStorage (default: collapsed)
+  var saved = localStorage.getItem('wb_map_collapsed');
+  _mapCollapsed = (saved === null) ? true : (saved === '1');
+  _applyMapCollapse();
+
+  function tryInitMap(attempts){
+    if(typeof L !== 'undefined'){
+      initMap();
+    } else if(attempts > 0){
+      setTimeout(function(){ tryInitMap(attempts - 1); }, 300);
+    } else {
+      console.warn('[map] Leaflet still not loaded after retries');
+    }
+  }
+  tryInitMap(15);   // up to 15 × 300ms = 4.5s wait
+});
+
+/* Extend existing toggleMode hook to also update map badge */
+(function(){
+  var _origToggle = window.toggleMode;
+  window.toggleMode = function(){
+    _origToggle();
+    updateMapModeBadge();
+  };
+})();
 
 /* ── TIME WINDOW BADGES on feed headers ───────────────────────────────── */
 function addTimeBadge(panelId,label,color){
@@ -1427,6 +3357,469 @@ setTimeout(function(){
   addTimeBadge('feedAlerts',   '48h','#d97706');
   addTimeBadge('feedMCC',      '48h','#d97706');
 },200);
+
+
+/* ═══════ DARK / LIGHT THEME TOGGLE ═══════ */
+var THEME_KEY = 'wb_intel_theme';
+
+function _applyTheme(dark){
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : '');
+  var btn = document.getElementById('themeToggleBtn');
+  if(btn) btn.textContent = dark ? '☀\uFE0F Light' : '🌙 Dark';
+}
+
+function openDisclaimer(){ document.getElementById('disclaimerModal').style.display='flex'; }
+function closeDisclaimer(){ document.getElementById('disclaimerModal').style.display='none'; }
+
+function toggleTheme(){
+  var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  var next   = !isDark;
+  _applyTheme(next);
+  try{ localStorage.setItem(THEME_KEY, next ? 'dark' : 'light'); }catch(e){}
+}
+
+// ── MOBILE PRIORITY FEED ─────────────────────────────────────────────────────
+var MOB_FEED_LIMIT = 10; // configurable — max items shown in mobile priority feed
+
+function buildMobileFeed(parsed){
+  var el = document.getElementById('mobPriorityFeedBody');
+  var countEl = document.getElementById('mobFeedCount');
+  if(!el) return;
+  var panels = {
+    'ALERTS':  parsed.alerts   || [],
+    'BANKURA': parsed.bankura  || [],
+    'SURR':    parsed.surrounds|| [],
+    'WB':      parsed.statewide|| [],
+    'OFFIC':   parsed.official || [],
+    'PARTIES': parsed.parties  || [],
+    'BANGLA':  parsed.bangla   || [],
+  };
+  var all = [];
+  Object.keys(panels).forEach(function(label){
+    (panels[label]).forEach(function(it){
+      all.push({src:it.source||'', summary:it.summary||it.text||'',
+                severity:it.severity||'low', time:it.time||'', url:it.url||'', _panel:label});
+    });
+  });
+  var sevOrd = {high:0, medium:1, med:1, low:2};
+  all.sort(function(a,b){ return (sevOrd[a.severity]||2)-(sevOrd[b.severity]||2); });
+  var total = all.length;
+  all = all.slice(0, MOB_FEED_LIMIT);
+  if(countEl) countEl.textContent = all.length+'/'+total;
+  if(!all.length){
+    el.innerHTML='<div class="mpf-empty">No items yet — run a fetch cycle</div>'; return;
+  }
+  el.innerHTML = all.map(function(it){
+    var sev = it.severity||'low';
+    var dot = sev==='high'?'🔴':(sev==='medium'||sev==='med')?'🟡':'🟢';
+    var borderColor = sev==='high'?'var(--red)':(sev==='medium'||sev==='med')?'var(--amber)':'var(--green)';
+    var sc=(function(s){
+      s=s.toLowerCase();
+      return s.includes('bjp')?'#f97316':s.includes('tmc')||s.includes('trinamool')?'#16a34a':
+             s.includes('ani')?'#7c3aed':s.includes('pti')?'#22c55e':'var(--accent)';
+    })(it.src);
+    var srcShort = it.src.substring(0,16);
+    var txt = it.url
+      ? '<a href="'+it.url+'" target="_blank" rel="noopener">'+it.summary+'</a>'
+      : it.summary;
+    return '<div class="mpf-item" style="border-left:3px solid '+borderColor+'">'+
+      '<div class="mpf-dot">'+dot+'</div>'+
+      '<div class="mpf-body">'+
+        '<div class="mpf-meta">'+
+          '<span class="mpf-panel">'+it._panel+'</span>'+
+          '<span class="mpf-src" style="color:'+sc+'">'+srcShort+'</span>'+
+          '<span class="mpf-time">'+it.time+'</span>'+
+        '</div>'+
+        '<div class="mpf-text">'+txt+'</div>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+}
+
+function updateMobTicker(items){
+  var inner = document.getElementById('mobTickerInner');
+  if(!inner || !items || !items.length) return;
+  // Duplicate array for seamless loop
+  var all = items.concat(items);
+  inner.innerHTML = all.map(function(it){
+    var txt = (it.summary||it.text||'').substring(0, 90);
+    var url = it.url||'';
+    var item = url
+      ? '<a href="'+url+'" target="_blank" rel="noopener">'+txt+'</a>'
+      : '<span>'+txt+'</span>';
+    return item + '<span class="mtk-sep"> ◆ </span>';
+  }).join('');
+  // Adjust animation speed based on total content length
+  var totalChars = items.reduce(function(n,it){ return n+(it.summary||'').length; }, 0);
+  var dur = Math.max(30, Math.min(120, totalChars * 0.15));
+  inner.style.animationDuration = dur + 's';
+}
+
+// ── MOBILE ANALYSIS EXPAND ───────────────────────────────────────────────────
+function toggleAnalysisExpand(bodyId, btn){
+  var body = document.getElementById(bodyId);
+  if(!body) return;
+  var expanded = body.classList.toggle('mob-expanded');
+  btn.textContent = expanded ? '▴ Show less' : '▾ Show more';
+}
+
+// ── MOBILE SIDEBAR ────────────────────────────────────────────────────────────
+function toggleSidebar(){
+  var s = document.getElementById('mainSidebar');
+  var bd = document.getElementById('sidebarBackdrop');
+  if(!s) return;
+  var isOpen = s.classList.contains('mob-open');
+  if(isOpen){ closeSidebar(); } else { openSidebar(); }
+}
+function openSidebar(){
+  var s = document.getElementById('mainSidebar');
+  var bd = document.getElementById('sidebarBackdrop');
+  if(s){ s.classList.add('mob-open'); }
+  if(bd){ bd.classList.add('mob-open'); document.body.style.overflow='hidden'; }
+}
+function closeSidebar(){
+  var s = document.getElementById('mainSidebar');
+  var bd = document.getElementById('sidebarBackdrop');
+  if(s){ s.classList.remove('mob-open'); }
+  if(bd){ bd.classList.remove('mob-open'); document.body.style.overflow=''; }
+}
+// Close sidebar when any ctrl-btn inside it is clicked on mobile
+document.addEventListener('DOMContentLoaded', function(){
+  var sidebar = document.getElementById('mainSidebar');
+  if(!sidebar) return;
+  var btns = sidebar.querySelectorAll('.ctrl-btn, .topic-chip, .tl-btn');
+  btns.forEach(function(btn){
+    btn.addEventListener('click', function(){
+      if(window.innerWidth <= 768){ closeSidebar(); }
+    });
+  });
+});
+
+// Apply saved theme immediately on load (before first paint)
+(function(){
+  try{
+    var saved = localStorage.getItem(THEME_KEY);
+    if(saved === 'dark') _applyTheme(true);
+  }catch(e){}
+})();
+
+
+/* ═══════ ARTICLE DIGEST MODAL ═══════ */
+var _digestReadKey = 'wb_intel_digest_read';
+var _digestNight   = false;
+var _digestData    = [];    // last loaded articles
+
+function _readIds(){
+  try{ return new Set(JSON.parse(localStorage.getItem(_digestReadKey)||'[]')); }
+  catch(e){ return new Set(); }
+}
+function _saveReadIds(s){
+  try{ localStorage.setItem(_digestReadKey, JSON.stringify([...s])); }catch(e){}
+}
+
+function _relTime(isoStr){
+  if(!isoStr) return '';
+  var diff = (Date.now() - new Date(isoStr).getTime()) / 60000; // minutes
+  if(diff < 60)   return Math.round(diff) + 'm ago';
+  if(diff < 1440) return Math.round(diff/60) + 'h ago';
+  return Math.round(diff/1440) + 'd ago';
+}
+
+function _digestCard(art, readSet){
+  var isRead  = readSet.has(art.id);
+  var sevCls  = art.severity === 'high' ? 'da-high' : 'da-medium';
+  var sevBadge= art.severity === 'high'
+    ? '<span class="da-sev da-sev-high">HIGH</span>'
+    : '<span class="da-sev da-sev-med">MED</span>';
+  var panelBadge = '<span class="da-panel">'+art.panel+'</span>';
+  var timeStr    = _relTime(art.first_seen);
+  var titleHtml  = art.url
+    ? '<a href="'+art.url+'" target="_blank" rel="noopener">'+_esc(art.title)+'</a>'
+    : _esc(art.title);
+
+  var bodyHtml = '';
+  if(art.digest_status === 'done' && art.digest){
+    bodyHtml = '<div class="da-digest">'+_esc(art.digest)
+      .replace(/Sentence (\d+)\s*[—–-][^:]*:\s*/g,'$1. ')
+      .replace(/\n/g,'<br>')+'</div>';
+  } else if(art.digest_status === 'pending' || art.digest_status === 'processing'){
+    bodyHtml = '<div class="da-pending">⏳ Digest generating…</div>';
+  } else if(art.digest_status === 'failed'){
+    bodyHtml = '<div class="da-failed">Digest unavailable — <a href="'+art.url+'" target="_blank">read original</a></div>';
+  }
+
+  var readBtn = isRead
+    ? '<button class="da-act-btn" onclick="toggleRead('+art.id+',this)">↩ Mark unread</button>'
+    : '<button class="da-act-btn" onclick="toggleRead('+art.id+',this)">✓ Mark read</button>';
+  var redigestBtn = (art.digest_status==='failed'||art.digest_status==='done')
+    ? '<button class="da-act-btn" onclick="redigest('+art.id+')">↻ Re-digest</button>'
+    : '';
+
+  return '<div class="da-card '+sevCls+(isRead?' da-read':'')+'" id="da-'+art.id+'">'
+    + '<div class="da-row1">'+sevBadge+panelBadge
+    + '<span class="da-source">'+_esc(art.source)+'</span>'
+    + '<span class="da-time">'+timeStr+'</span></div>'
+    + '<div class="da-title">'+titleHtml+'</div>'
+    + bodyHtml
+    + '<div class="da-actions">'+readBtn+redigestBtn+'</div>'
+    + '</div>';
+}
+
+function _esc(s){
+  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function loadDigests(){
+  var days = document.getElementById('dmDaysFilter').value;
+  var sev  = document.getElementById('dmSevFilter').value;
+  var body = document.getElementById('dmBody');
+  var stats = document.getElementById('dmStats');
+  if(body) body.innerHTML = '<div class="dm-empty">Loading…</div>';
+
+  var endpoint = window.location.origin + '/api/digests';
+
+  fetch(endpoint + '?days='+days+'&sev='+sev)
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      _digestData = data.articles || [];
+      var st = data.stats || {};
+      var done    = st.done    || 0;
+      var pending = (st.pending||0) + (st.processing||0);
+      var failed  = st.failed  || 0;
+      var total   = _digestData.length;
+      var readSet = _readIds();
+      var unread  = _digestData.filter(function(a){ return a.digest_status==='done' && !readSet.has(a.id); }).length;
+
+      // Update sidebar counts
+      var doneEl = document.getElementById('digestDoneCount');
+      var pendEl = document.getElementById('digestPendingCount');
+      var badge  = document.getElementById('digestUnreadBadge');
+      if(doneEl) doneEl.textContent = done;
+      if(pendEl) pendEl.textContent = pending + (failed ? ' ('+failed+' failed)' : '');
+      if(badge){ badge.textContent = unread; badge.className = 'digest-badge'+(unread?' show':''); }
+
+      if(stats) stats.innerHTML =
+        '<span class="dm-stat-pill done">✓ '+done+' digested</span>'
+        + '<span class="dm-stat-pill pending">⏳ '+pending+' pending</span>'
+        + (failed ? '<span class="dm-stat-pill">✗ '+failed+' failed</span>' : '')
+        + '<span class="dm-stat-pill high">'+total+' total · '+unread+' unread</span>';
+
+      if(!_digestData.length){
+        if(body) body.innerHTML = '<div class="dm-empty">No articles yet. Run a fetch cycle to populate the digest queue.</div>';
+        return;
+      }
+
+      var html = _digestData.map(function(a){ return _digestCard(a, readSet); }).join('');
+      if(body){ body.innerHTML = html; if(_digestNight) body.parentElement.classList.add('dm-nightmode'); }
+    })
+    .catch(function(e){
+      if(body) body.innerHTML = '<div class="dm-empty" style="color:var(--red)">Failed to load digests.<br><span style="font-size:11px">Is the proxy running? '+e.message+'</span></div>';
+    });
+}
+
+function openDigest(){
+  document.getElementById('digestModal').classList.add('open');
+  loadDigests();
+}
+function closeDigest(){
+  document.getElementById('digestModal').classList.remove('open');
+}
+
+function toggleNightMode(){
+  _digestNight = !_digestNight;
+  var body = document.getElementById('dmBody');
+  var btn  = document.getElementById('dmNightBtn');
+  if(body){ if(_digestNight) body.parentElement.classList.add('dm-nightmode');
+            else body.parentElement.classList.remove('dm-nightmode'); }
+  if(btn) btn.textContent = _digestNight ? '☀ Normal view' : '🌙 Night brief';
+}
+
+function toggleRead(id, btn){
+  var s = _readIds();
+  if(s.has(id)){ s.delete(id); } else { s.add(id); }
+  _saveReadIds(s);
+  var card = document.getElementById('da-'+id);
+  if(card){ card.classList.toggle('da-read', s.has(id)); }
+  if(btn) btn.textContent = s.has(id) ? '↩ Mark unread' : '✓ Mark read';
+  // Update sidebar unread badge
+  var unread = _digestData.filter(function(a){ return a.digest_status==='done' && !s.has(a.id); }).length;
+  var badge = document.getElementById('digestUnreadBadge');
+  if(badge){ badge.textContent = unread; badge.className = 'digest-badge'+(unread?' show':''); }
+}
+
+function markAllRead(){
+  var s = _readIds();
+  _digestData.forEach(function(a){ s.add(a.id); });
+  _saveReadIds(s);
+  document.querySelectorAll('.da-card').forEach(function(c){ c.classList.add('da-read'); });
+  var badge = document.getElementById('digestUnreadBadge');
+  if(badge){ badge.textContent = '0'; badge.className = 'digest-badge'; }
+}
+
+function redigest(id){
+  var endpoint = window.location.origin+'/api/digest/redigest?id='+id;
+  fetch(endpoint).then(function(){
+    var card = document.getElementById('da-'+id);
+    if(card){
+      var b = card.querySelector('.da-digest, .da-pending, .da-failed');
+      if(b) b.outerHTML = '<div class="da-pending">⏳ Re-queued for digesting…</div>';
+    }
+  });
+}
+
+function exportDigests(){
+  var done = _digestData.filter(function(a){ return a.digest_status==='done'; });
+  if(!done.length){ alert('No completed digests to export yet.'); return; }
+  var lines = ['WB ELECTION INTEL — ARTICLE DIGEST EXPORT',
+               'Generated: '+new Date().toLocaleString('en-IN'), ''];
+  var prev = '';
+  done.forEach(function(a){
+    var panel = (a.panel||'').toUpperCase();
+    if(panel !== prev){ lines.push('\n── '+panel+' ──────────────────────'); prev=panel; }
+    lines.push('\n['+a.severity.toUpperCase()+'] '+a.title);
+    lines.push('Source: '+a.source+'  |  '+_relTime(a.first_seen));
+    if(a.digest) lines.push(a.digest);
+    if(a.url)    lines.push('↗ '+a.url);
+  });
+  var blob = new Blob([lines.join('\n')], {type:'text/plain'});
+  var link = document.createElement('a');
+  link.href     = URL.createObjectURL(blob);
+  link.download = 'bankura_digest_'+new Date().toISOString().slice(0,10)+'.txt';
+  link.click();
+}
+
+// ── ANI + PTI Wire Ticker ─────────────────────────────────────────────────────
+var _wireScrollTimer = null;
+var _wireOffset = 0;
+
+function _startWireScroll(){
+  clearInterval(_wireScrollTimer);
+  var inner = document.getElementById('wireInner');
+  var vp    = document.getElementById('wireViewport');
+  if(!inner || !vp) return;
+  var totalH = inner.offsetHeight;  // full list height
+  var vpH    = vp.offsetHeight;     // visible window height
+  if(totalH <= vpH){ return; }      // content fits — no scroll needed
+
+  // Pause on hover
+  vp.onmouseenter = function(){ clearInterval(_wireScrollTimer); };
+  vp.onmouseleave = function(){ _startWireScroll(); };
+
+  _wireScrollTimer = setInterval(function(){
+    _wireOffset += 0.6;                       // ~30px/s at 50ms interval
+    if(_wireOffset >= totalH - vpH + 20){
+      _wireOffset = 0;                        // snap back to top
+    }
+    inner.style.transform = 'translateY(-' + _wireOffset + 'px)';
+  }, 20);
+}
+
+function loadWire(){
+  var base = window.location.origin;
+  fetch(base + '/api/wire')
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      var items = data.items || [];
+      var meta  = document.getElementById('wireMeta');
+      if(meta) meta.textContent = 'ANI · PTI · ' + items.length + ' items';
+      if(!items.length){
+        if(!loadWire._retried){ loadWire._retried=true; setTimeout(loadWire,6000); }
+        return;
+      }
+      loadWire._retried = false;
+      function makeItem(it){
+        var cls = it.severity==='high' ? 'w-high' : (it.severity==='medium' ? 'w-med' : '');
+        var src = it.source.toLowerCase();
+        var safeUrl = (it.url||'').replace(/'/g,'%27');
+        return '<div class="wire-item '+cls+'" onclick="window.open(\''+safeUrl+'\',\'_blank\')">'
+          + '<div class="wire-item-src '+src+'">'+it.source+'</div>'
+          + '<div class="wire-item-title">'+(it.title||'').replace(/</g,'&lt;')+'</div>'
+          + '</div>';
+      }
+      var inner = document.getElementById('wireInner');
+      if(inner){
+        _wireOffset = 0;
+        inner.style.transform = 'translateY(0)';
+        inner.innerHTML = items.map(makeItem).join('');
+        // Match height to Bankura panel, then start scroll after paint
+        _matchWireHeight();
+        setTimeout(function(){ _matchWireHeight(); _startWireScroll(); }, 150);
+      }
+    })
+    .catch(function(){
+      if(!loadWire._retried){ loadWire._retried=true; setTimeout(loadWire,6000); }
+    });
+}
+
+function _matchWireHeight(){
+  // Update wire panel height to match Bankura Intel panel height
+  var ref  = document.getElementById('analysisBankura');
+  var wire = document.querySelector('.wire-panel');
+  if(!ref || !wire) return;
+  var h = ref.offsetHeight;
+  if(h > 50){ wire.style.height = h + 'px'; }
+}
+
+loadWire();                                    // direct call — DOM ready (script at bottom)
+setInterval(loadWire, 10 * 60 * 1000);        // re-fetch every 10 min
+
+
+// ── Phase 3B: Candidate news monitor (Google News per AC) ─────────────────────
+function loadFiguresNews(){
+  var base = window.location.origin;
+  fetch(base + '/api/figures-news')
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      var figures = data.figures || {};
+      var names   = Object.keys(figures);
+      if(!names.length) return;
+      // Inject a "Recent News" strip into each fig-card that has articles
+      names.forEach(function(name){
+        var articles = figures[name];
+        if(!articles || !articles.length) return;
+        // Find figure card by data-name attribute
+        var card = document.querySelector('.fig-card[data-name="'+name.replace(/"/g,'&quot;')+'"]');
+        if(!card) return;
+        // Remove any previously injected strip
+        var old = card.querySelector('.fig-news-strip');
+        if(old) old.parentNode.removeChild(old);
+        // Build strip HTML (up to 2 headlines)
+        var html = '<div class="fig-news-strip">'
+          + articles.slice(0,2).map(function(a){
+              var age = '';
+              try{
+                var h = Math.round((Date.now() - new Date(a.pub).getTime()) / 3600000);
+                age = '<span class="fig-news-age">' + (h < 1 ? '<1h' : h+'h') + '</span>';
+              }catch(e){}
+              return '<a class="fig-news-item" href="'+(a.url||'#')+'" target="_blank">'
+                + age + (a.title||'').replace(/</g,'&lt;').slice(0,90) + '</a>';
+            }).join('')
+          + '</div>';
+        card.insertAdjacentHTML('beforeend', html);
+      });
+
+      // Re-score and re-show top 4 (news strips now injected, scores updated)
+      _applyFigureVisibility();
+    })
+    .catch(function(){});   // silent fail — figures card works without this
+}
+
+setTimeout(loadFiguresNews, 2000);                    // slight delay after page settles
+setInterval(loadFiguresNews, 15 * 60 * 1000);         // refresh every 15 min
+
+// Poll sidebar counts every 2 min while page is open (catches background digests completing)
+setInterval(function(){
+  var endpoint = window.location.origin+'/api/digests?days=7&status=done';
+  fetch(endpoint).then(function(r){ return r.json(); }).then(function(data){
+    var done  = (data.articles||[]).length;
+    var readS = _readIds();
+    var unread= (data.articles||[]).filter(function(a){ return !readS.has(a.id); }).length;
+    var doneEl = document.getElementById('digestDoneCount');
+    var badge  = document.getElementById('digestUnreadBadge');
+    if(doneEl) doneEl.textContent = done;
+    if(badge){ badge.textContent=unread; badge.className='digest-badge'+(unread?' show':''); }
+  }).catch(function(){});
+}, 2 * 60 * 1000);
 
 
 </script>

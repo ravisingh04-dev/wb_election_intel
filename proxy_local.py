@@ -22,15 +22,449 @@ Then open: http://localhost:5050
 """
 
 import sys, os, json, re, argparse, threading, time, socket, socketserver, urllib.request, urllib.error
-import webbrowser, xml.etree.ElementTree as ET
+import webbrowser, xml.etree.ElementTree as ET, sqlite3
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlparse
 
 SCRIPT_DIR     = Path(__file__).parent.resolve()
 DASHBOARD_FILE = SCRIPT_DIR / "wb_live_intel_dashboard.html"
 OSINT_FILE     = SCRIPT_DIR / "wb_osint_monitor.html"
 DEFAULT_PORT   = 5050
+
+# ─── PHASE 2 FEATURE FLAGS ────────────────────────────────────────────────────
+# Set to False to instantly disable without touching any other code.
+FEATURE_SQLITE   = True   # persist cycles + articles to bankura_intel.db
+FEATURE_DIGEST   = True   # background LLM digest of MED/HIGH articles
+
+_wire_cache = {"ts": 0.0, "items": []}   # ANI+PTI wire feed cache (10-min TTL)
+
+DB_PATH              = SCRIPT_DIR / "bankura_intel.db"
+TELEGRAM_CONFIG_FILE = SCRIPT_DIR / "telegram_config.json"
+_db_lock = threading.Lock()   # single write-lock for all DB operations
+_fetch_lock = threading.Lock()  # prevent concurrent LLM fetches (central + manual)
+_CENTRAL_FETCH_INTERVAL = 15 * 60  # seconds — one fetch every 15 min, all clients read from DB
+
+# ─── SQLite helpers ───────────────────────────────────────────────────────────
+
+def _db_conn():
+    c = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=15)
+    c.row_factory = sqlite3.Row
+    return c
+
+def _db_init():
+    """Create tables on first run. Safe to call repeatedly (IF NOT EXISTS)."""
+    if not FEATURE_SQLITE:
+        return
+    with _db_lock:
+        c = _db_conn()
+        c.executescript("""
+            CREATE TABLE IF NOT EXISTS digested_articles (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                url           TEXT    UNIQUE,
+                title         TEXT,
+                source        TEXT,
+                severity      TEXT,
+                panel         TEXT,
+                published_at  TEXT,
+                first_seen    TEXT,
+                full_text     TEXT,
+                digest        TEXT,
+                digest_status TEXT DEFAULT 'pending',
+                digested_at   TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_da_status   ON digested_articles(digest_status);
+            CREATE INDEX IF NOT EXISTS idx_da_severity ON digested_articles(severity);
+            CREATE INDEX IF NOT EXISTS idx_da_seen     ON digested_articles(first_seen);
+            CREATE TABLE IF NOT EXISTS cycles (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                fetched_at       TEXT,
+                threat_level     TEXT,
+                total_signals    INTEGER,
+                high_alerts      INTEGER,
+                violence_reports INTEGER,
+                full_json        TEXT
+            );
+            CREATE TABLE IF NOT EXISTS turnout_snapshots (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                recorded_at     TEXT,
+                district        TEXT,
+                turnout_pct     REAL,
+                booths_total    INTEGER,
+                booths_reported INTEGER,
+                source          TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_ts_district
+                ON turnout_snapshots(district, recorded_at);
+
+            -- Phase 4B: Daily Briefing
+            CREATE TABLE IF NOT EXISTS briefing_config (
+                key   TEXT PRIMARY KEY,
+                value TEXT
+            );
+            CREATE TABLE IF NOT EXISTS briefing_sends (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                sent_at      TEXT,
+                trigger      TEXT,
+                threat_level TEXT,
+                headline     TEXT,
+                ntfy_status  TEXT,
+                sms_status   TEXT,
+                cycle_id     INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_bsends_sent
+                ON briefing_sends(sent_at);
+        """)
+        c.commit(); c.close()
+    print(f"  [DB] Initialised: {DB_PATH}")
+
+def _save_digest_candidates(panel_items):
+    """
+    After each fetch, queue new MED/HIGH articles for background digesting.
+    Dedup by URL — INSERT OR IGNORE means same article from multiple feeds
+    is stored only once.
+    """
+    if not FEATURE_SQLITE or not FEATURE_DIGEST:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    _DIGEST_WB_KW = [
+        "west bengal", "bengal", "bankura", "bishnupur", "kolkata", "calcutta",
+        "mamata", "trinamool", "tmc", "wb election", "wb 2026", "wb poll",
+        "purulia", "jhargram", "birbhum", "bardhaman", "medinipur", "howrah",
+        "saltora", "chhatna", "ranibandh", "taldangra", "barjora", "sonamukhi",
+    ]
+    # Panel priority: what the observer cares about most, first
+    panel_order = ["bankura","alerts","surrounds","statewide","official","parties","bangla"]
+    candidates = []
+    seen_urls  = set()
+    for panel in panel_order:
+        for item in panel_items.get(panel, []):
+            url = (item.get("url") or "").strip()
+            if not url or url in seen_urls:
+                continue
+            # Drop YouTube — video thumbnails have no digestible text.
+            # Check both URL (direct links) and source field (Google News redirects
+            # to YouTube return source="YouTube" in the RSS <source> element).
+            src = item.get("source", "")
+            if "youtube.com" in url or "youtu.be" in url or src == "YouTube":
+                continue
+            sev = _score_severity(item.get("title","") + " " + item.get("desc",""))
+            if sev not in ("high", "medium"):
+                continue
+            # WB relevance gate — drop non-Bengal articles (UP, Bihar, national, etc.)
+            text = (item.get("title","") + " " + item.get("desc","")).lower()
+            if not any(kw in text for kw in _DIGEST_WB_KW):
+                continue
+            seen_urls.add(url)
+            candidates.append((
+                url,
+                (item.get("title") or "")[:500],
+                item.get("source",""),
+                sev, panel,
+                item.get("time",""), now
+            ))
+    if not candidates:
+        return
+    with _db_lock:
+        c = _db_conn()
+        inserted = 0
+        for row in candidates:
+            c.execute("""
+                INSERT OR IGNORE INTO digested_articles
+                  (url, title, source, severity, panel, published_at, first_seen, digest_status)
+                VALUES (?,?,?,?,?,?,?,'pending')
+            """, row)
+            if c.execute("SELECT changes()").fetchone()[0]:
+                inserted += 1
+        c.commit(); c.close()
+    if inserted:
+        print(f"  [digest] +{inserted} article(s) queued")
+
+def _fetch_article_text(url, timeout=8):
+    """
+    Try to GET full article HTML and extract paragraph text.
+    Returns extracted text (up to 3000 chars) or None if blocked/paywalled.
+    No external dependencies — pure stdlib.
+    """
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+            "Accept-Language": "en-IN,en;q=0.9",
+        })
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read(200_000).decode("utf-8", errors="replace")
+        paras = re.findall(r'<p[^>]*>\s*([^<]{60,})\s*</p>', raw, re.I)
+        text  = " ".join(p.strip() for p in paras[:20])
+        text  = re.sub(r'<[^>]+>', ' ', text)
+        text  = re.sub(r'\s{2,}', ' ', text).strip()
+        return text[:3000] if len(text) > 120 else None
+    except Exception:
+        return None
+
+def _digest_one(row_dict, ollama_base, model):
+    """Call Ollama to produce a 3-sentence digest. Returns string or None."""
+    title    = row_dict.get("title","")
+    body     = row_dict.get("full_text") or ""
+    source   = row_dict.get("source","")
+    panel    = row_dict.get("panel","")
+    severity = (row_dict.get("severity") or "medium").upper()
+    content  = body if len(body) > 200 else title
+    prompt = (
+        f"Election intelligence analyst, Bankura district observer, WB 2026.\n"
+        f"Write a digest of this {severity}-priority article from '{source}' [{panel} feed].\n"
+        f"Output exactly 3 numbered points, each a single sentence, no headings or labels:\n"
+        f"1. What happened (facts only).\n"
+        f"2. Who is involved and where.\n"
+        f"3. Why it matters for Bankura Phase 1 (23 Apr 2026) observer.\n\n"
+        f"Article: {content}\n\nDigest:"
+    )
+    try:
+        payload = json.dumps({
+            "model":    model,
+            "messages": [{"role":"user","content":prompt}],
+            "stream":   False,
+            "options":  {"temperature":0.1,"num_ctx":2048,"think":False},
+        }).encode()
+        req = urllib.request.Request(
+            f"{ollama_base}/api/chat",
+            data=payload,
+            headers={"Content-Type":"application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            data = json.loads(resp.read())
+        msg = data.get("message") or {}
+        return (msg.get("content") or "").strip() or None
+    except Exception as e:
+        print(f"  [digest] LLM error: {e}")
+        return None
+
+_digest_worker_active = False
+
+def _start_digest_worker(ollama_base, model):
+    """Launch the background digest thread (daemon — exits with main process)."""
+    if not FEATURE_SQLITE or not FEATURE_DIGEST:
+        return
+    def _worker():
+        global _digest_worker_active
+        _digest_worker_active = True
+        print("  [digest] Background worker started")
+        while True:
+            try:
+                with _db_lock:
+                    c = _db_conn()
+                    row = c.execute("""
+                        SELECT id, url, title, source, severity, panel, full_text
+                        FROM digested_articles WHERE digest_status='pending'
+                        ORDER BY CASE severity WHEN 'high' THEN 1 ELSE 2 END,
+                                 CASE panel WHEN 'bankura' THEN 1 WHEN 'alerts' THEN 2
+                                            WHEN 'surrounds' THEN 3 ELSE 4 END,
+                                 first_seen ASC
+                        LIMIT 1
+                    """).fetchone()
+                    c.close()
+
+                if row is None:
+                    time.sleep(300); continue   # idle: check every 5 min
+
+                rid   = row["id"]
+                title = row["title"]
+                url   = row["url"]
+
+                # Mark in-progress to prevent double processing
+                with _db_lock:
+                    c = _db_conn()
+                    c.execute("UPDATE digested_articles SET digest_status='processing' WHERE id=?", (rid,))
+                    c.commit(); c.close()
+
+                print(f"  [digest] Fetching: {title[:70]}…")
+                full_text = _fetch_article_text(url) or ""
+                if full_text:
+                    with _db_lock:
+                        c = _db_conn()
+                        c.execute("UPDATE digested_articles SET full_text=? WHERE id=?", (full_text, rid))
+                        c.commit(); c.close()
+
+                row_dict = dict(row); row_dict["full_text"] = full_text
+                digest   = _digest_one(row_dict, ollama_base, model)
+                now      = datetime.now(timezone.utc).isoformat()
+
+                with _db_lock:
+                    c = _db_conn()
+                    if digest:
+                        c.execute("""UPDATE digested_articles
+                                     SET digest=?, digest_status='done', digested_at=?
+                                     WHERE id=?""", (digest, now, rid))
+                        print(f"  [digest] ✓ {title[:70]}")
+                    else:
+                        c.execute("UPDATE digested_articles SET digest_status='failed' WHERE id=?", (rid,))
+                        print(f"  [digest] ✗ failed: {title[:70]}")
+                    c.commit(); c.close()
+
+                time.sleep(20)   # pace between articles — don't overload Ollama
+
+            except Exception as e:
+                print(f"  [digest] Worker error: {e}")
+                time.sleep(60)
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+
+# ── ANI + PTI wire fetcher (cached 10 min) ─────────────────────────────────
+
+def _fetch_wire():
+    """Fetch ANI + PTI Google News RSS for West Bengal, cache 10 min.
+    Only articles published within the last 30 hours are included."""
+    global _wire_cache
+    if time.time() - _wire_cache["ts"] < 600:   # 10-min cache
+        return _wire_cache["items"]
+
+    import email.utils as _eu
+    WIRE_MAX_AGE_H = 48          # 48h window
+    now_ts = time.time()
+    cutoff_ts = now_ts - WIRE_MAX_AGE_H * 3600
+
+    items = []
+    ua = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+    for source, url in WIRE_FEEDS:
+        try:
+            req  = urllib.request.Request(url, headers={"User-Agent": ua})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = r.read().lstrip(b'\xef\xbb\xbf')
+            root    = ET.fromstring(data)
+            entries = root.findall(".//item")
+            seen    = set()
+            for it in entries[:40]:          # scan more items since old ones get dropped
+                title = (it.findtext("title") or "").strip()
+                title = re.sub(r"\s*[-|]\s*[A-Z][^|]{2,35}$", "", title).strip()
+                if not title or len(title) < 10:
+                    continue
+                fp = re.sub(r"\W+", "", title.lower())[:40]
+                if fp in seen:
+                    continue
+                seen.add(fp)
+                link    = (it.findtext("link") or "").strip()
+                pub_raw = (it.findtext("pubDate") or "").strip()
+                # ── Time filter: drop items older than 30 h ───────────────
+                if pub_raw:
+                    try:
+                        pub_ts = _eu.parsedate_to_datetime(pub_raw).timestamp()
+                        if pub_ts < cutoff_ts:
+                            continue          # too old
+                        pub_iso = datetime.fromtimestamp(pub_ts, tz=timezone.utc).isoformat()
+                    except Exception:
+                        pub_iso = pub_raw     # unparseable — keep item, show raw string
+                else:
+                    pub_iso = ""
+                # ── WB relevance filter ───────────────────────────────────
+                tl = title.lower()
+                if not any(kw in tl for kw in _WIRE_WB_KW):
+                    continue
+                sev = _score_severity(title)
+                items.append({
+                    "source":   source,
+                    "title":    title,
+                    "url":      link,
+                    "pub":      pub_iso,
+                    "severity": sev,
+                })
+        except Exception as e:
+            print(f"  [wire] {source} fetch error: {e}")
+
+    # Sort: HIGH first, then newest first
+    # pub is stored as ISO string — fromisoformat() handles it correctly
+    def _pub_ts(item):
+        try:
+            return datetime.fromisoformat(item["pub"]).timestamp() if item["pub"] else 0
+        except Exception:
+            return 0
+    items.sort(key=lambda x: (
+        0 if x["severity"] == "high" else (1 if x["severity"] == "medium" else 2),
+        -_pub_ts(x)
+    ))
+    _wire_cache = {"ts": time.time(), "items": items}
+    return items
+
+# ── Phase 3B: Fetch candidate news from Google News (grouped by AC) ──────────
+def _fetch_figures_news():
+    """Fetch Google News per AC, tag articles back to individual candidates.
+    Returns dict: {candidate_name: [{"title","url","pub","source","ac"}]}
+    Cached 15 min; 13 AC-grouped queries run concurrently via threads."""
+    global _FIGURES_NEWS_CACHE
+    if time.time() - _FIGURES_NEWS_CACHE["ts"] < 900:   # 15-min cache
+        return _FIGURES_NEWS_CACHE["data"]
+
+    result = {}   # name -> list of articles
+    lock   = threading.Lock()
+
+    def _fetch_ac(ac_label, names, url):
+        try:
+            req  = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                raw = resp.read()
+            root = ET.fromstring(raw)
+            items = root.findall(".//item")
+            for it in items:
+                title = (it.findtext("title") or "").strip()
+                link  = it.findtext("link") or ""
+                pub   = it.findtext("pubDate") or ""
+                # Convert RFC2822 pubDate → ISO
+                try:
+                    import email.utils as _eu
+                    pub = datetime.fromtimestamp(
+                        _eu.parsedate_to_datetime(pub).timestamp(),
+                        tz=timezone.utc
+                    ).isoformat()
+                except Exception:
+                    pub = pub
+                # Age filter — 60 days (candidate news cycles slower than wire)
+                try:
+                    from datetime import datetime as _dt
+                    age_h = (datetime.now(timezone.utc) -
+                             _dt.fromisoformat(pub)).total_seconds() / 3600
+                    if age_h > 180 * 24:  # 4320h = 180 days (6 months)
+                        continue
+                except Exception:
+                    pass
+                # Tag to whichever candidate name appears in title (case-insensitive)
+                title_l = title.lower()
+                tagged  = False
+                for name in names:
+                    # Match on last name or full name
+                    parts = [p.lower() for p in name.replace("Dr. ","").split() if len(p) > 3]
+                    if any(p in title_l for p in parts):
+                        article = {"title": title, "url": link, "pub": pub,
+                                   "source": "Google News", "ac": ac_label}
+                        with lock:
+                            result.setdefault(name, []).append(article)
+                        tagged = True
+                # If no specific name match, attach to AC — only first candidate as sentinel
+                # so the AC still shows up in the result even without named mentions
+                if not tagged and len(title) > 10:
+                    article = {"title": title, "url": link, "pub": pub,
+                               "source": "Google News", "ac": ac_label}
+                    with lock:
+                        result.setdefault(names[0], []).append(article)
+        except Exception as e:
+            print(f"  [figures-news] {ac_label} error: {e}")
+
+    threads = [threading.Thread(target=_fetch_ac, args=(ac, names, url), daemon=True)
+               for ac, names, url in FIGURE_AC_FEEDS]
+    for t in threads: t.start()
+    for t in threads: t.join(timeout=20)
+
+    # Keep only latest 3 articles per candidate, sorted newest first
+    def _ts(a):
+        try: return datetime.fromisoformat(a["pub"]).timestamp()
+        except: return 0
+    for name in result:
+        result[name] = sorted(result[name], key=_ts, reverse=True)[:3]
+
+    _FIGURES_NEWS_CACHE = {"ts": time.time(), "data": result}
+    return result
 
 # ── Political figures to monitor for feed mentions ───────────────────────────
 # Updated March 2026 — all declared 2026 candidates for Bankura district ACs
@@ -129,14 +563,14 @@ POLITICAL_FIGURES = [
 #   Items older than their panel threshold are silently dropped.
 
 MAX_AGE_HOURS = {
-    "bankura":   96,   # 4 days for local Bankura items
-    "surrounds": 48,   # 48h for surrounding districts
-    "statewide": 48,   # 48h for WB statewide
-    "alerts":    48,   # 48h for alerts — pre-election coverage
-    "official":  48,   # 48h for official updates
-    "social":    48,   # 48h for social media signals
-    "parties":   48,   # 48h for party statements/press releases
-    "bangla":    48,   # 48h for Bengali-language sources
+    "bankura":   96,   # 4 days — low-volume local beat (when:4d in gnews)
+    "surrounds": 52,   # ~2 days + buffer (when:2d in gnews)
+    "statewide": 52,   # ~2 days + buffer (when:2d in gnews)
+    "alerts":    100,  # ~4 days + buffer (when:4d in gnews — real incidents are sparse)
+    "official":  52,   # ~2 days + buffer
+    "social":    52,
+    "parties":   52,
+    "bangla":    52,
 }
 
 # NOTE: Nitter (open-source Twitter frontend with RSS) was removed.
@@ -145,79 +579,148 @@ MAX_AGE_HOURS = {
 # which aggregates viral tweets and news that cites Twitter sources reliably.
 
 # Google News RSS — reliable, no auth, good coverage
-def gnews(query):
-    return f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}&hl=en-IN&gl=IN&ceid=IN:en"
+def gnews(query, when="2d"):
+    """Google News RSS. when='2d' restricts to last 2 days — keeps surrounds/alerts fresh."""
+    q = urllib.parse.quote(query + (f" when:{when}" if when else ""))
+    return f"https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
 
 def gnews_bn(query):
     """Google News RSS — Bengali language edition (returns Bengali-language articles)."""
     return f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}&hl=bn&gl=IN&ceid=IN:bn"
 
+# ── Phase 3B: Candidate news feeds (grouped by AC, used by /api/figures-news) ─
+# One Google News query per assembly constituency — candidates ORed together.
+# 12 queries run concurrently, results tagged back to individual candidates.
+FIGURE_AC_FEEDS = [
+    # (ac_label, [candidate names], rss_url)
+    ("AC247 Saltora",
+     ["Chandana Bauri", "Uttam Bauri"],
+     gnews('"Chandana Bauri" OR "Uttam Bauri" West Bengal election 2026')),
+    ("AC248 Chhatna",
+     ["Satyanarayan Mukhopadhyay", "Swapan Kumar Mandal", "Rajib Kar"],
+     gnews('"Satyanarayan Mukhopadhyay" OR "Swapan Kumar Mandal" OR "Rajib Kar" West Bengal 2026')),
+    ("AC249 Ranibandh",
+     ["Kshudiram Tudu", "Dr. Tanushree Hansda", "Debalina Hembram"],
+     gnews('"Kshudiram Tudu" OR "Tanushree Hansda" OR "Debalina Hembram" West Bengal election 2026')),
+    ("AC250 Raipur",
+     ["Kshetra Mohan Hansda", "Thakur Moni Soren"],
+     gnews('"Kshetra Mohan Hansda" OR "Thakur Moni Soren" West Bengal election 2026')),
+    ("AC251 Taldangra",
+     ["Souvik Patra", "Falguni Singhababu"],
+     gnews('"Souvik Patra" OR "Falguni Singhababu" West Bengal election 2026')),
+    ("AC252 Bankura",
+     ["Niladri Sekhar Dana", "Dr. Anup Mondal", "Abhayananda Mukherjee"],
+     gnews('"Niladri Sekhar Dana" OR "Anup Mondal" OR "Abhayananda Mukherjee" Bankura election 2026')),
+    ("AC253 Barjora",
+     ["Billeshwar Singha", "Goutam Mishra", "Sujit Chakraborty"],
+     gnews('"Billeshwar Singha" OR "Goutam Mishra" OR "Sujit Chakraborty" Barjora election 2026')),
+    ("AC254 Onda",
+     ["Amarnath Shakha", "Subrata Dutta"],
+     gnews('"Amarnath Shakha" OR "Subrata Dutta" Onda West Bengal election 2026')),
+    ("AC255 Bishnupur",
+     ["Viswajit Khan", "Tanmoy Ghosh"],
+     gnews('"Viswajit Khan" OR "Tanmoy Ghosh" Bishnupur election 2026')),
+    ("AC256 Kotulpur",
+     ["Laxmikanta Majumdar", "Harakali Pratihar", "Ramchandra Roy"],
+     gnews('"Laxmikanta Majumdar" OR "Harakali Pratihar" OR "Ramchandra Roy" Kotulpur election 2026')),
+    ("AC257 Indas",
+     ["Nirmal Kumar Dhara", "Shyamali Roy Bagdi", "Mona Mallick"],
+     gnews('"Nirmal Kumar Dhara" OR "Shyamali Roy Bagdi" OR "Mona Mallick" Indas election 2026')),
+    ("AC258 Sonamukhi",
+     ["Dibakar Gharami", "Dr. Kallol Saha", "Ajit Roy"],
+     gnews('"Dibakar Gharami" OR "Kallol Saha" OR "Ajit Roy" Sonamukhi election 2026')),
+    # Key district leaders — separate query
+    ("Leaders",
+     ["Saumitra Khan", "Arup Chakraborty", "Dr. Subhas Sarkar", "Basudeb Acharia"],
+     gnews('"Saumitra Khan" OR "Subhas Sarkar" OR "Arup Chakraborty" OR "Basudeb Acharia" Bankura West Bengal 2026')),
+]
+_FIGURES_NEWS_CACHE = {"ts": 0.0, "data": {}}  # {candidate_name: [articles]}
+
+# ── Wire agency feeds (WB-scoped, used by /api/wire) ─────────────────────────
+# ANI: site:aninews.in returns Google-cached stale articles (100–40000h old)
+#      Using keyword query instead — same approach as PTI
+# IANS: dropped — Google News returns stub "IANS - IANS" titles only (unusable)
+WIRE_FEEDS = [
+    ("ANI", gnews("ANI \"West Bengal\" election 2026", when="2d")),
+    ("PTI", gnews("PTI \"West Bengal\" election 2026", when="2d")),
+]
+# Minimum keywords one of which must appear in title for wire item to pass WB filter
+_WIRE_WB_KW = [
+    "west bengal", "bengal", "bankura", "kolkata", "calcutta", "mamata",
+    "trinamool", "tmc", "bjp", "cpm", "wb election", "wb poll",
+    "bishnupur", "purulia", "jhargram", "medinipur", "howrah",
+]
+
 RSS_FEEDS = [
-    # ── BANKURA LOCAL (4 days) ────────────────────────────────────────────
+    # ── BANKURA LOCAL (4 days — low-volume beat needs wider window) ──────────
     ("bankura", "Google: Bankura election 2026",
-     gnews("Bankura election 2026")),
+     gnews("Bankura election 2026", when="2d")),
     ("bankura", "Google: Bankura candidate campaign",
-     gnews("Bankura candidate campaign rally 2026")),
-    ("bankura", "Google: Bishnupur election",
-     gnews("Bishnupur election 2026")),
+     gnews("Bankura candidate campaign rally 2026", when="2d")),
+    ("bankura", "Google: Bishnupur Bankura election",
+     gnews('"Bishnupur" "West Bengal" election 2026', when="2d")),
     ("bankura", "Google: Bishnupur Barjora Sonamukhi",
-     gnews("Bishnupur OR Barjora OR Sonamukhi election 2026")),
+     gnews('"Bishnupur" "West Bengal" OR Barjora OR Sonamukhi election 2026', when="2d")),
     ("bankura", "Google: Saltora Chhatna Taldangra Onda",
-     gnews("Saltora OR Chhatna OR Taldangra OR Onda election 2026")),
+     gnews("Saltora OR Chhatna OR Taldangra OR Onda election 2026", when="2d")),
     ("bankura", "Google: Bankura violence MCC",
-     gnews("Bankura election violence OR MCC violation 2026")),
-    ("bankura", "Google: Kotulpur Indas Raipur Ranibandh",
-     gnews("Kotulpur OR Indas OR Raipur OR Ranibandh election 2026")),
+     gnews("Bankura election violence OR MCC violation 2026", when="2d")),
+    ("bankura", "Google: Kotulpur Indas Ranibandh Raipur Bankura",
+     gnews('Kotulpur OR Indas OR Ranibandh OR "Raipur Bankura" OR "Raipur West Bengal" election 2026', when="2d")),
     ("bankura", "Google: Bankura polling booth security",
-     gnews("Bankura polling booth security paramilitary 2026")),
+     gnews("Bankura polling booth security paramilitary 2026", when="2d")),
 
-    # ── SURROUNDING DISTRICTS (36h) ────────────────────────────────────────
+    # ── SURROUNDING DISTRICTS (48h) ───────────────────────────────────────
     ("surrounds", "Google: Purulia election",
-     gnews("Purulia election 2026")),
+     gnews("Purulia election 2026", when="2d")),
     ("surrounds", "Google: Jhargram election",
-     gnews("Jhargram election 2026")),
+     gnews("Jhargram election 2026", when="2d")),
     ("surrounds", "Google: Birbhum election",
-     gnews("Birbhum election 2026")),
+     gnews("Birbhum election 2026", when="2d")),
     ("surrounds", "Google: Paschim Bardhaman election",
-     gnews("Paschim Bardhaman OR Asansol OR Durgapur election 2026")),
+     gnews("Paschim Bardhaman OR Asansol OR Durgapur election 2026", when="2d")),
     ("surrounds", "Google: Paschim Medinipur election",
-     gnews("Paschim Medinipur OR Kharagpur election 2026")),
+     gnews("Paschim Medinipur OR Kharagpur election 2026", when="2d")),
+    ("surrounds", "Google: Purulia Jhargram violence MCC",
+     gnews("Purulia OR Jhargram OR Birbhum election violence arrest MCC 2026", when="2d")),
 
-    # ── WEST BENGAL STATEWIDE — election-specific only ─────────────────────
+    # ── WEST BENGAL STATEWIDE ─────────────────────────────────────────────
     ("statewide", "Google: WB election Phase 1 violence booth",
-     gnews("West Bengal election Phase 1 2026 violence OR booth OR MCC OR candidate")),
+     gnews("West Bengal election Phase 1 2026 violence OR booth OR MCC OR candidate", when="2d")),
     ("statewide", "Google: TMC BJP clash Bengal election",
-     gnews("TMC BJP West Bengal election clash violence arrest 2026")),
+     gnews("TMC BJP West Bengal election clash violence arrest 2026", when="2d")),
     ("statewide", "ANI: WB election Phase 1",
-     gnews("West Bengal election Phase 1 2026 site:aninews.in")),
+     gnews("West Bengal election Phase 1 2026 site:aninews.in", when="2d")),
     ("statewide", "Telegraph India: WB election",
-     gnews("West Bengal election 2026 site:telegraphindia.com")),
+     gnews("West Bengal election 2026 site:telegraphindia.com", when="2d")),
     ("statewide", "NDTV: WB election Phase 1",
-     gnews("West Bengal assembly election Phase 1 2026 site:ndtv.com")),
+     gnews("West Bengal assembly election Phase 1 2026 site:ndtv.com", when="2d")),
     ("statewide", "Google: WB booth capture rigging 2026",
-     gnews("West Bengal booth capture rigging poll violence 2026")),
+     gnews("West Bengal booth capture rigging poll violence 2026", when="2d")),
     ("statewide", "Google: WB election candidate campaign 2026",
-     gnews("West Bengal election candidate campaign Phase 1 Bankura Purulia 2026")),
+     gnews("West Bengal election candidate campaign Phase 1 Bankura Purulia 2026", when="2d")),
     ("statewide", "Google: WB election CRPF deployment security",
-     gnews("West Bengal election CRPF deployment security Phase 1 2026")),
+     gnews("West Bengal election CRPF deployment security Phase 1 2026", when="2d")),
     ("statewide", "Google: WB election ECI order Phase 1",
-     gnews("West Bengal election 2026 ECI order announcement Phase 1 Bankura")),
+     gnews("West Bengal election 2026 ECI order announcement Phase 1 Bankura", when="2d")),
 
-    # ── ALERTS (24h only) ──────────────────────────────────────────────────
+    # ── ALERTS (4d — violence/MCC/arms coverage; real incidents are sparse) ──
     ("alerts", "Google: WB election violence booth capture",
-     gnews("West Bengal election violence booth capture 2026")),
+     gnews("West Bengal election violence booth capture 2026", when="2d")),
     ("alerts", "Google: West Bengal MCC violation",
-     gnews("West Bengal election MCC violation 2026")),
+     gnews("West Bengal election MCC violation 2026", when="2d")),
     ("alerts", "Google: EVM VVPAT complaint Bengal",
-     gnews("EVM VVPAT complaint West Bengal 2026")),
+     gnews("EVM VVPAT complaint West Bengal 2026", when="2d")),
     ("alerts", "Google: WB election arrest seized",
-     gnews("West Bengal election arrest seized cash arms 2026")),
+     gnews("West Bengal election arrest seized cash arms 2026", when="2d")),
     ("alerts", "Google: Bengal bomb crude bomb election",
-     gnews("Bengal bomb crude election 2026")),
+     gnews("Bengal bomb crude election 2026", when="2d")),
+    ("alerts", "Google: Malda Murshidabad violence Bengal",
+     gnews("Malda OR Murshidabad election violence arrest 2026", when="2d")),
 
-    # ── OFFICIAL (24h only) ────────────────────────────────────────────────
+    # ── OFFICIAL (48h) ────────────────────────────────────────────────────
     ("official", "Google: ECI West Bengal order",
-     gnews("Election Commission West Bengal 2026 order directive")),
+     gnews("Election Commission West Bengal 2026 order directive", when="2d")),
     ("official", "Google: CRPF paramilitary Bengal",
      gnews("CRPF paramilitary West Bengal election deployment 2026")),
     ("official", "Google: CEO West Bengal",
@@ -264,6 +767,16 @@ RSS_FEEDS = [
     # Bengali Google News — WB Phase 1 general
     ("bangla", "Bengali News: পশ্চিমবঙ্গ ভোট",
      gnews_bn("পশ্চিমবঙ্গ বিধানসভা নির্বাচন ২০২৬ প্রথম দফা")),
+    # ── YOUTUBE CHANNELS — via Google News index (direct YT RSS blocked server-side) ─
+    # ABP Ananda (channel: UCwzOMowuG2q5Xgf9LIRJbSg)
+    ("bangla", "ABP Ananda YouTube: election 2026",
+     gnews("ABP Ananda election West Bengal 2026 site:youtube.com")),
+    # Zee 24 Ghanta (channel: UCIvaYmXn910QMdemBG3v1pQ)
+    ("bangla", "Zee 24 Ghanta YouTube: election 2026",
+     gnews("Zee 24 Ghanta election West Bengal 2026 site:youtube.com")),
+    # TV9 Bangla
+    ("bangla", "TV9 Bangla YouTube: election 2026",
+     gnews("TV9 Bangla election West Bengal 2026 site:youtube.com")),
 ]
 
 # Social media monitoring URLs (shown in dashboard as clickable links, not RSS)
@@ -530,7 +1043,7 @@ def call_ollama(payload_dict, base_url, model):
                 "temperature": 0.1,
                 "options":     {"num_predict": num_predict, "num_ctx": 4096,
                                "temperature": 0.1},
-                "think":       False,   # disable chain-of-thought for qwen3.x (saves 60% tokens)
+                "think":       False,   # disable chain-of-thought if supported (qwen3.x); ignored by other models
             }).encode()
             req = urllib.request.Request(
                 endpoint, data=body, method="POST",
@@ -636,23 +1149,38 @@ def anthropic_response(text):
     }
 
 def _repair_json_py(text):
-    """Best-effort JSON extraction from raw LLM output (strips fences, finds outermost {})."""
+    """
+    Best-effort JSON extraction from raw LLM output.
+    Handles: markdown fences, preamble text before {, truncated JSON,
+    and the case where the model outputs prose instead of JSON.
+    """
     text = text.strip()
     # Strip markdown fences
     text = re.sub(r'^```(?:json)?\s*', '', text)
     text = re.sub(r'\s*```$', '', text)
     text = text.strip()
+    # Try direct parse first (happy path)
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    # Find the outermost {...}
+    # Find the FIRST '{' and treat everything from there as JSON
+    # This handles preamble text like "As an analyst, here is the JSON: {...}"
+    brace_pos = text.find('{')
+    if brace_pos > 0:
+        text = text[brace_pos:]
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+    # Use greedy regex to find outermost {...} block
     m = re.search(r'\{[\s\S]*\}', text)
     if m:
         try:
             return json.loads(m.group())
         except json.JSONDecodeError:
             pass
+    # Last resort: nothing parseable — return empty so fallback analysis is used
     return {}
 
 def merge_prebuilt_with_analysis(llm_result, pre_built):
@@ -674,7 +1202,7 @@ def merge_prebuilt_with_analysis(llm_result, pre_built):
 
     blank_analysis = {
         "headline": "Analysis unavailable — see raw feeds",
-        "bankuraSituation": "", "surroundingSituation": "",
+        "bankuraSituation": "", "statewideContext": "",
         "partyPositions": "",
         "keyRisks": ["", "", ""], "observerActions": ["", "", ""],
         "disinfoAlerts": "", "overallAssessment": "",
@@ -715,20 +1243,94 @@ def merge_prebuilt_with_analysis(llm_result, pre_built):
     return anthropic_response(json.dumps(full))
 
 def _score_severity(text):
-    """Pure Python severity scorer — no LLM needed."""
+    """
+    3-tier severity scorer.
+
+    HIGH   — physical violence that actually happened: deaths, bombs, booth capture,
+              abductions, firing, injuries during a clash or assault,
+              arrests of candidates/agents/workers at a polling location.
+    MEDIUM — MCC violations, EVM issues, political confrontation, 'clash' used
+              metaphorically (no injury words present), arms/cash/liquor seizures,
+              protest/tension, candidate list news, political analysis.
+    LOW    — routine political statements, rally announcements, opinion pieces,
+              candidate profiles, party strategy analysis.
+
+    Rules:
+      • 'clash' alone  → MEDIUM   (covers "Mamata's clash with ECI")
+      • 'clash' + physical injury words → HIGH   (covers "clash leaves 3 injured")
+      • 'arrested/detained' → HIGH only when at a polling booth / election-day context
+      • 'analysis/why/opinion/strategy' patterns → cap at MEDIUM even if other words present
+    """
     t = text.lower()
-    if any(k in t for k in [
-        "killed","murder","bomb","crude bomb","firing","shot dead",
-        "booth capture","abduct","assault","riot","arson","loot",
-        "detained","arrested","clash","attack","stone pelting","hurt","injured"
-    ]):
+
+    # ── Cap analysis/opinion at MEDIUM regardless of other keywords ──────────
+    _ANALYSIS_PATTERNS = [
+        "why ", " sees advantage", " strategy", "political analysis",
+        "opinion:", "analysis:", "explainer", " explained", "here's why",
+        "what it means", "sees benefit", "mamata's strategy", "bjp strategy",
+        "tmc strategy",
+    ]
+    is_analysis = any(p in t for p in _ANALYSIS_PATTERNS)
+
+    # ── Definite HIGH: physical violence, no context needed ──────────────────
+    # NOTE: bare "bullet" removed — "bulletproof" contains it and is not violence.
+    # "shot dead/shot at/firing" already cover all genuine gunfire scenarios.
+    _DEFINITE_HIGH = [
+        "killed", "bomb", "crude bomb",
+        "firing", "shot dead", "shot at",
+        "booth capture", "booth looting",
+        "abduct", "kidnap",
+        "riot", "arson",
+        "stone pelting",
+    ]
+    if not is_analysis and any(k in t for k in _DEFINITE_HIGH):
         return "high"
-    if any(k in t for k in [
-        "mcc violation","complaint","seized","cash","liquor","arms",
-        "tension","confrontation","blocked","stopped","protest",
-        "evm","vvpat","malfunction","tamper","threat","intimidat"
-    ]):
+
+    # ── "murder" only HIGH for current election violence ─────────────────────
+    # Historical crime references (RG Kar case, past murder cases) should not
+    # inflate the threat level — they are MEDIUM at most.
+    _MURDER_HISTORICAL = [
+        "murder victim", "rape-murder", "murder case", "murder accused",
+        "murder probe", "murder convict", "murder suspect", "murder trial",
+        "murder of", "who was murdered",
+    ]
+    if not is_analysis and "murder" in t:
+        if not any(p in t for p in _MURDER_HISTORICAL):
+            return "high"
+        # else: historical reference — fall through to MEDIUM
+
+    # ── Conditional HIGH: 'clash/attack/assault/loot' only if injury words present ──
+    _PHYSICAL_INJURY = ["injur", "hurt", "wound", "hospitalised", "dead", "died", "bleed"]
+    _CONDITIONAL_HIGH_TRIGGER = ["clash", "attack", "assault", "loot"]
+    has_injury = any(k in t for k in _PHYSICAL_INJURY)
+    if not is_analysis and has_injury and any(k in t for k in _CONDITIONAL_HIGH_TRIGGER):
+        return "high"
+
+    # ── Conditional HIGH: arrests only if election-day / booth-specific context ──
+    _ARREST_CONTEXT = [
+        "during polling", "on polling day", "election day",
+        "at booth", "polling booth", "at polling",
+        "candidate arrested", "agent arrested", "worker arrested",
+        "poll worker", "presiding officer",
+    ]
+    if not is_analysis and any(k in t for k in ["arrested", "detained"]):
+        if any(ctx in t for ctx in _ARREST_CONTEXT):
+            return "high"
+
+    # ── MEDIUM: everything below clear violence but above routine news ───────
+    _MEDIUM_KW = [
+        "mcc violation", "model code violation",
+        "seized", "cash seized", "liquor seized", "arms seized", "illegal cash",
+        "tension", "clash", "confrontation", "blocked", "stopped",
+        "evm", "vvpat", "malfunction", "tamper",
+        "threat", "intimidat",
+        "protest", "agitation", "arrested", "detained",   # general arrest = medium
+        "complaint", "allegation", "violation",
+        "second list", "candidate list", "announces list",  # candidate news = medium
+    ]
+    if any(k in t for k in _MEDIUM_KW):
         return "medium"
+
     return "low"
 
 def _topic_counts(panel_items):
@@ -758,13 +1360,52 @@ def _topic_counts(panel_items):
         hits(oi,    ["paramilitary","crpf","bsf","cisf","deployment"]),
     ]
 
-def _threat_level(violence_count, mcc_count, high_items):
-    """Compute threat level from article signals."""
-    if violence_count >= 4 or high_items >= 5:
+# Location keywords used for incident-level violence deduplication.
+# When 9 sources all report "Malda violence", they share loc="malda" + vkw="violence"
+# → fingerprint "malda__violence" → counted as 1 incident, not 9.
+_INCIDENT_LOC_KW = [
+    "bankura", "bishnupur", "barjora", "sonamukhi", "kotulpur", "indas",
+    "saltora", "chhatna", "taldangra", "onda", "ranibandh", "raipur",
+    "malda", "birbhum", "bardhaman", "medinipur", "murshidabad",
+    "howrah", "kolkata", "purulia", "jhargram", "cooch behar",
+    "nadia", "raghunathganj", "purulia", "kharagpur",
+]
+
+def _count_violence_incidents(items, violence_kws, loc_kws):
+    """Count unique (location, violence_type) incident pairs — not article count.
+    All articles about 'Malda violence' → fingerprint 'malda__violence' → 1 incident."""
+    incidents = set()
+    unlocated = 0
+    for it in items:
+        text = (it.get("title", "") + " " + it.get("desc", "") + " " + it.get("summary_hint", "")).lower()
+        v_matched = [k for k in violence_kws if k in text]
+        if not v_matched:
+            continue
+        locs = [kw for kw in loc_kws if kw in text]
+        if locs:
+            incidents.add(f"{sorted(locs)[0]}__{v_matched[0]}")
+        else:
+            unlocated += 1
+    return len(incidents) + min(unlocated, 2)
+
+def _threat_level(violence_count, mcc_count, high_items, total_dedup=0):
+    """
+    Compute threat level using INCIDENT-COUNT thresholds.
+
+    violence_count is now the number of UNIQUE (location, violence_type) incidents
+    — not article count — so a single event covered by 9 sources counts as 1.
+
+    Scale:
+      CRITICAL  — 5+ distinct violence incidents OR 8+ high-severity LLM items
+      HIGH      — 2-4 distinct violence incidents OR 4+ high-severity LLM items
+      MODERATE  — 1 violence incident OR 3+ MCC incidents OR 2+ high-severity
+      LOW       — routine pre-election activity, no confirmed violence
+    """
+    if violence_count >= 5 or high_items >= 8:
         return "CRITICAL"
-    if violence_count >= 2 or high_items >= 3:
+    if violence_count >= 2 or high_items >= 4:
         return "HIGH"
-    if violence_count >= 1 or mcc_count >= 2 or high_items >= 1:
+    if violence_count >= 1 or mcc_count >= 3 or high_items >= 2:
         return "MODERATE"
     return "LOW"
 
@@ -801,15 +1442,17 @@ def inject_news_into_payload(payload_dict):
 
     # ── Stage 1: Pure Python scoring, classification & array building ────────
 
-    # Election relevance filter — keeps only items with at least one election keyword
-    # Applied to statewide panel to strip general/non-election news
+    # ── Filter 1: Election relevance ─────────────────────────────────────────
+    # Items must mention at least one election keyword to pass.
+    # NOTE: bare "seize/arrest/clash" removed — too broad, catches non-WB national news.
+    # Those words remain valid for severity scoring AFTER geographic check passes.
     _ELECTION_KW = [
         "election", "vote", "voting", "voter", "electi", "candidate", "constituency",
         "assembly", "mcc", "model code", "booth", "evm", "vvpat", "ballot",
         "polling", "poll station", "phase 1", "phase1",
         "tmc", "trinamool", "bjp", "congress", "cpim", "cpi(m)", "left front",
         "mamata", "campaign", "rally", "nomination", "manifesto",
-        "violence", "clash", "arrest", "detain", "seize", "paramilitary", "crpf", "bsf",
+        "paramilitary", "crpf", "bsf",
         "eci", "election commission", "ceo west bengal", "returning officer",
         "bankura", "purulia", "jhargram", "birbhum", "bardhaman", "medinipur",
         "bishnupur", "saltora", "chhatna", "ranibandh", "taldangra", "barjora", "onda",
@@ -819,26 +1462,108 @@ def inject_news_into_payload(payload_dict):
         text = (item.get("title", "") + " " + item.get("desc", "")).lower()
         return any(kw in text for kw in _ELECTION_KW)
 
-    statewide_raw    = [it for it in panel_items.get("statewide", []) if _is_election_relevant(it)]
-    filtered_out     = len(panel_items.get("statewide", [])) - len(statewide_raw)
-    if filtered_out:
-        print(f"  Statewide filter: dropped {filtered_out} non-election article(s)")
+    # ── Filter 2: West Bengal geographic relevance ────────────────────────────
+    # Statewide panel (and violence counting) must be anchored to WB/Bengal.
+    # This drops Delhi gun seizures, UP/Bihar/MP election news, etc.
+    # News from OTHER poll-bound states is dropped unless it has direct WB bearing.
+    _WB_GEO_KW = [
+        "west bengal", "bengal", "wb ",
+        "bankura", "purulia", "jhargram", "birbhum", "bardhaman", "burdwan",
+        "medinipur", "howrah", "hooghly", "kolkata", "calcutta",
+        "murshidabad", "malda", "nadia", "cooch behar", "darjeeling", "jalpaiguri",
+        "north 24", "south 24", "24 pargana",
+        "bishnupur bankura", "bishnupur west bengal",
+        "saltora", "chhatna", "ranibandh", "taldangra", "barjora",
+        "onda", "kotulpur", "sonamukhi", "indas", "raipur bankura", "raipur west bengal",
+        "mamata", "trinamool", "tmc", "wb election", "wb 2026",
+        "ceo west bengal", "bengal election",
+    ]
+    # Hard blocklist — international/national topics that can never be WB election news
+    _INTL_BLOCK = [
+        "israel", "palestine", "gaza", "lebanon", "ukraine", "russia", "nato",
+        "pakistan", "china", "myanmar", "bangladesh election", "us election",
+        "donald trump", "white house", "congress us", "senate", "pentagon",
+        "stock market", "sensex", "nifty", "rupee", "rbi rate", "gdp",
+        "ipl ", "cricket", "bollywood", "oscar", "grammy",
+        "chhattisgarh", "chattisgarh", "manipur", "churachandpur", "imphal",
+    ]
+    def _is_wb_relevant(item):
+        text = (item.get("title", "") + " " + item.get("desc", "")).lower()
+        if any(bl in text for bl in _INTL_BLOCK):
+            return False
+        return any(kw in text for kw in _WB_GEO_KW)
 
-    bankura_panel   = _build_panel_json(panel_items.get("bankura",   []))
-    surrounds_panel = _build_panel_json(panel_items.get("surrounds", []))
+    # Statewide: election-relevant AND WB-geographic
+    statewide_raw = [
+        it for it in panel_items.get("statewide", [])
+        if _is_election_relevant(it) and _is_wb_relevant(it)
+    ]
+    # Alerts: Google News RSS for violence/arms/MCC often pulls national crime news.
+    # Apply WB geo-filter so Delhi/UP/Bihar seizures never appear in alerts panel.
+    alerts_raw = [
+        it for it in panel_items.get("alerts", [])
+        if _is_wb_relevant(it)
+    ]
+    # Parties: BJP/TMC press-release feeds also pull national party news.
+    # Filter to WB-relevant items (mentions Bengal/Mamata/TMC/district names).
+    parties_raw = [
+        it for it in panel_items.get("parties", [])
+        if _is_wb_relevant(it)
+    ]
+    # Bankura/surrounds/official: WB-specific queries but Google News still occasionally
+    # returns unrelated international articles — apply geo-filter to all panels.
+    bankura_raw  = [it for it in panel_items.get("bankura",  []) if _is_wb_relevant(it)]
+    surrounds_raw2 = [it for it in panel_items.get("surrounds",[]) if _is_wb_relevant(it)]
+    official_raw = [it for it in panel_items.get("official", []) if _is_wb_relevant(it)]
+    # Bangla sources: Bengali-language feeds — keep as-is (WB-only sources)
+    bangla_raw   = panel_items.get("bangla", [])
+
+    bk_dropped = len(panel_items.get("bankura",  [])) - len(bankura_raw)
+    sr_dropped = len(panel_items.get("surrounds",[])) - len(surrounds_raw2)
+    of_dropped = len(panel_items.get("official", [])) - len(official_raw)
+
+    # Log how much was dropped across all filtered panels
+    sw_dropped = len(panel_items.get("statewide", [])) - len(statewide_raw)
+    al_dropped = len(panel_items.get("alerts",    [])) - len(alerts_raw)
+    pa_dropped = len(panel_items.get("parties",   [])) - len(parties_raw)
+    total_dropped = sw_dropped + al_dropped + pa_dropped + bk_dropped + sr_dropped + of_dropped
+    if total_dropped:
+        print(f"  Geo-filter: dropped {total_dropped} non-WB article(s) "
+              f"[bankura:{bk_dropped} surrounds:{sr_dropped} statewide:{sw_dropped} "
+              f"alerts:{al_dropped} official:{of_dropped} parties:{pa_dropped}]")
+
+    bankura_panel   = _build_panel_json(bankura_raw)
+    surrounds_panel = _build_panel_json(surrounds_raw2)
     statewide_panel = _build_panel_json(statewide_raw)
-    parties_panel   = _build_panel_json(panel_items.get("parties",   []))
-    alerts_panel    = _build_panel_json(panel_items.get("alerts",    []))
-    official_panel  = _build_panel_json(panel_items.get("official",  []))
-    bangla_panel    = _build_panel_json(panel_items.get("bangla",    []))
+    parties_panel   = _build_panel_json(parties_raw)
+    alerts_panel    = _build_panel_json(alerts_raw)
+    official_panel  = _build_panel_json(official_raw)
+    bangla_panel    = _build_panel_json(bangla_raw)
 
     all_panels = (bankura_panel + surrounds_panel + statewide_panel +
                   parties_panel + alerts_panel + official_panel + bangla_panel)
 
-    violence_keywords = ["killed","murder","bomb","crude bomb","firing","shot","booth capture",
-                         "abduct","assault","riot","arson","loot","detained","clash","attack",
-                         "stone pelting","hurt","injured","arrested","violence"]
-    mcc_keywords      = ["mcc","model code","violation","seized","cash","liquor","arms","bribe"]
+    # Signals = WB-relevant, geo-filtered articles actually used — not raw feed count.
+    # Using the raw fetch count (200+) with when="4d" gives misleading "212 signals" display.
+    count_wb = (len(bankura_raw) + len(surrounds_raw2) + len(statewide_raw) +
+                len(alerts_raw) + len(parties_raw) + len(official_raw) + len(bangla_raw))
+
+    # ── Violence / MCC counting: WB-only items, tighter keyword list ─────────
+    # 'clash', 'arrested', 'detained' removed from violence keywords —
+    # they are too broad and inflate counts when national news leaks through.
+    # Only actual physical violence events count toward threat level.
+    violence_keywords = [
+        "killed", "murder", "bomb", "crude bomb", "firing", "shot dead", "shot at",
+        "booth capture", "booth looting",
+        "abduct", "kidnap",
+        "assault", "riot", "arson", "loot",
+        "stone pelting", "injured", "hurt", "violence",
+    ]
+    mcc_keywords = [
+        "mcc violation", "model code violation",
+        "liquor seized", "cash seized", "arms seized", "illegal cash",
+        "bribe", "inducement",
+    ]
 
     def kw_count(items, kws):
         n = 0
@@ -848,18 +1573,34 @@ def inject_news_into_payload(payload_dict):
                 n += 1
         return n
 
-    all_raw = (panel_items.get("bankura",[]) + panel_items.get("surrounds",[]) +
-               panel_items.get("statewide",[]) + panel_items.get("parties",[]) +
-               panel_items.get("alerts",[]) + panel_items.get("official",[]) +
-               panel_items.get("bangla",[]))
+    # Violence and MCC counts use ONLY geo-filtered items — use *_raw filtered lists,
+    # not the raw panel_items which include pre-filter articles (inflates counts with when="4d").
+    wb_raw = (bankura_raw + surrounds_raw2 + statewide_raw + alerts_raw +
+              parties_raw + official_raw + bangla_raw)
 
-    violence_count = kw_count(all_raw, violence_keywords)
-    mcc_count      = kw_count(all_raw, mcc_keywords)
+    # Deduplicate wb_raw by title fingerprint before counting violence/MCC.
+    # The same incident (e.g. "Malda violence") is reported by many sources —
+    # Incident-level violence deduplication:
+    # Title-based fingerprint fails when 9 sources each write a different headline
+    # for the same physical event (e.g., Malda violence). Instead, fingerprint on
+    # (location_keyword + violence_keyword) pair: all "Malda violence" articles
+    # share loc="malda", vkw="violence" → fingerprint "malda__violence" → 1 incident.
+    # MCC and high_items still use full deduplicated list for accuracy.
+    _seen_fps = set()
+    wb_raw_dedup = []
+    for _it in wb_raw:
+        _fp = re.sub(r"\W+", "", (_it.get("title","") + _it.get("summary_hint","")).lower())[:40]
+        if _fp not in _seen_fps:
+            _seen_fps.add(_fp)
+            wb_raw_dedup.append(_it)
+
+    violence_count = _count_violence_incidents(wb_raw, violence_keywords, _INCIDENT_LOC_KW)
+    mcc_count      = kw_count(wb_raw_dedup, mcc_keywords)
     high_items     = sum(1 for it in all_panels if it["severity"] == "high")
-    threat_level   = _threat_level(violence_count, mcc_count, high_items)
+    threat_level   = _threat_level(violence_count, mcc_count, high_items, len(wb_raw_dedup))
     topic_counts   = _topic_counts(panel_items)
 
-    print(f"  Signals: {count} | Violence hits: {violence_count} | MCC hits: {mcc_count} | Threat: {threat_level}")
+    print(f"  Signals (WB-filtered): {count_wb} (raw fetched: {count}) | Violence hits: {violence_count} | MCC hits: {mcc_count} | Threat: {threat_level}")
 
     # Build Python feed arrays — LLM never touches these
     BANGLA_MAX = 6   # items sent to LLM for translation — must match panel_brief max_items
@@ -875,7 +1616,7 @@ def inject_news_into_payload(payload_dict):
 
     pre_built = {
         "metrics": {
-            "totalSignals": count, "highAlerts": high_items,
+            "totalSignals": count_wb, "highAlerts": high_items,
             "violenceReports": violence_count, "threatLevel": threat_level,
         },
         "bankura":   build_feed_array(bankura_panel),
@@ -889,10 +1630,12 @@ def inject_news_into_payload(payload_dict):
     }
 
     # ── Scan all items for political figure mentions ─────────────────────────
+    # Use all WB-relevant items + parties panel (party statements mention candidates)
+    figure_scan_items = wb_raw + panel_items.get("parties", [])
     figure_mentions = []
     for fig in POLITICAL_FIGURES:
         matches = []
-        for it in all_raw:
+        for it in figure_scan_items:
             text = (it.get("title","") + " " + it.get("desc","")).lower()
             if any(kw in text for kw in fig["keywords"]):
                 matches.append({
@@ -911,6 +1654,15 @@ def inject_news_into_payload(payload_dict):
     mentioned = sum(1 for f in figure_mentions if f["count"] > 0)
     print(f"  Figure monitor: {mentioned}/{len(POLITICAL_FIGURES)} figures mentioned in feeds")
     pre_built["figureMentions"] = figure_mentions
+
+    # ── Phase 4: per-AC threat metrics for map overlay ────────────────────────
+    pre_built["acMetrics"] = _build_ac_metrics(panel_items, figure_mentions)
+
+    # ── Phase 4B: escalation briefing check ───────────────────────────────────
+    _check_escalation(threat_level)
+
+    # ── Phase 2: queue new MED/HIGH articles for background digesting ──────────
+    _save_digest_candidates(panel_items)
 
     # Stash for do_POST() to merge after LLM returns
     payload_dict["_pre_built"] = pre_built
@@ -950,9 +1702,48 @@ def inject_news_into_payload(payload_dict):
         f"You are an election intelligence analyst briefing an official observer in Bankura district, "
         f"West Bengal. Phase 1 election date: 23 April 2026. Current time: {ts}.\n"
         f"You understand Bengali. Translate any Bengali headlines to English accurately.\n"
-        f"Output ONLY raw JSON — no markdown, no explanation. Start with {{ end with }}.\n"
+        f"\n"
+        f"GEOGRAPHIC SEPARATION RULE — THIS IS MANDATORY:\n"
+        f"The news feed contains articles from TWO distinct geographic scopes:\n"
+        f"  (A) BANKURA DISTRICT and its immediate assembly constituencies — Saltora, Chhatna, "
+        f"Ranibandh, Raipur, Taldangra, Barjora, Onda, Sonamukhi, Kotulpur, Indas, Bishnupur.\n"
+        f"  (B) REST OF WEST BENGAL — Malda, Murshidabad, Birbhum, Kolkata, and other districts.\n"
+        f"You MUST NEVER attribute incidents, violence, or tensions from scope (B) to scope (A). "
+        f"If violence or clashes are reported in Malda, Murshidabad, or any non-Bankura district, "
+        f"they belong ONLY in statewideContext — NOT in bankuraSituation, NOT in keyRisks for Bankura, "
+        f"and NOT in the headline unless Bankura itself is explicitly named. "
+        f"If no violence or tension is specifically reported from Bankura district, bankuraSituation "
+        f"must reflect that calm — state 'No significant incidents reported from Bankura district' "
+        f"rather than importing statewide tensions.\n"
+        f"\n"
+        f"FACTUAL CONTEXT — DO NOT CONTRADICT THESE ESTABLISHED FACTS:\n"
+        f"1. ECI SECURITY RATIONALISATION: The Election Commission of India routinely withdraws "
+        f"or reduces security cover for politicians after the Model Code of Conduct (MCC) comes into "
+        f"effect, specifically targeting cover that was assigned by the ruling state government shortly "
+        f"before MCC implementation. This is standard ECI procedure to prevent misuse of state machinery "
+        f"and is NOT a 'security lapse', NOT negligence, and NOT a risk to election integrity. "
+        f"If you see 'ECI withdraws security cover' in the feeds, describe it accurately as 'ECI "
+        f"rationalises pre-MCC security assignments per standard procedure' — never frame it as a lapse.\n"
+        f"2. CAPF/PARAMILITARY DEPLOYMENT: Central Armed Police Forces (CAPF), CRPF, BSF, and other "
+        f"paramilitary deployment in West Bengal is a direct ECI response to documented history of poll "
+        f"violence in the state. Increased deployment is an election security measure, not a provocation. "
+        f"Any claim that 'more security forces = rising tensions' or 'CAPF deployment increases fear' is "
+        f"a POLITICAL PARTY NARRATIVE (typically from the ruling party seeking to limit central oversight), "
+        f"not an objective security assessment. Never state this as a neutral risk — always attribute it "
+        f"as a party claim in partyPositions, or flag it in disinfoAlerts if it appears designed to "
+        f"discourage ECI security measures.\n"
+        f"3. SOURCE ATTRIBUTION RULE: When a fact or risk originates from a single political party's "
+        f"statement, press release, or spokesperson, you MUST attribute it explicitly: "
+        f"'[Party name] claims...' or '[Party name] alleges...'. Never present a party claim as a "
+        f"verified, neutral fact in keyRisks or overallAssessment. Party claims belong in partyPositions "
+        f"or, if they appear to be coordinated misinformation, in disinfoAlerts.\n"
+        f"\n"
+        f"CRITICAL INSTRUCTION: Respond with ONLY a raw JSON object. "
+        f"Do NOT write any introduction, preamble, disclaimer, acknowledgement, or explanation. "
+        f"Do NOT say 'Here is', 'As an analyst', 'I will', 'Based on', or anything similar. "
+        f"Your ENTIRE response must be valid JSON starting with {{ and ending with }}. "
         f"Required format:\n"
-        f'{{"analysis":{{"headline":"","bankuraSituation":"","surroundingSituation":"",'
+        f'{{"analysis":{{"headline":"","bankuraSituation":"","statewideContext":"",'
         f'"partyPositions":"","keyRisks":["","",""],"observerActions":["","",""],'
         f'"disinfoAlerts":"","overallAssessment":""}},'
         f'"bangla_translations":["Pure English translation only — no Bengali script","Pure English only"]}}'
@@ -961,21 +1752,34 @@ def inject_news_into_payload(payload_dict):
     user_prompt = (
         f"{brief}\n\n"
         f"Task 1 — ANALYSIS: Write a concise intelligence analysis for the observer.\n"
-        f"- headline: one sentence capturing the most important development\n"
-        f"- bankuraSituation: 2-3 sentences on Bankura district specifically\n"
-        f"- surroundingSituation: 2-3 sentences on surrounding districts\n"
-        f"- partyPositions: key party actions, statements, or incidents\n"
-        f"- keyRisks: exactly 3 specific risks the observer should watch for\n"
-        f"- observerActions: exactly 3 concrete recommended actions\n"
-        f"- disinfoAlerts: any rumours, fake news, or coordinated narratives detected (or 'None detected')\n"
-        f"- overallAssessment: 2-3 sentence overall situation assessment\n\n"
+        f"- headline: one sentence on the single most important development; "
+        f"only mention Bankura if Bankura itself has a notable event — otherwise lead with statewide context.\n"
+        f"- bankuraSituation: 2-3 sentences STRICTLY limited to Bankura district and its ACs. "
+        f"Use ONLY items from the [BANKURA DISTRICT] section. "
+        f"If no incidents are reported from Bankura, write 'No significant incidents reported from "
+        f"Bankura district. Routine pre-election activity observed.' Do NOT import Malda/WB tensions here.\n"
+        f"- statewideContext: 2-3 sentences on West Bengal statewide situation including "
+        f"surrounding districts (Malda, Murshidabad, Birbhum etc.) and statewide alerts. "
+        f"This is where Malda violence, Murshidabad clashes, and other non-Bankura incidents belong.\n"
+        f"- partyPositions: key party actions, statements, or incidents (cite district if known)\n"
+        f"- keyRisks: exactly 3 specific risks; clearly label each with the district/location it applies to. "
+        f"Do NOT list a Malda or Murshidabad risk as a Bankura risk. "
+        f"Do NOT list ECI security rationalisation as a risk — it is standard procedure. "
+        f"Do NOT list CAPF/paramilitary deployment as a risk — it is a security measure. "
+        f"Only include verified facts or credible reports, never single-party claims, as risks.\n"
+        f"- observerActions: exactly 3 concrete recommended actions for the Bankura observer\n"
+        f"- disinfoAlerts: flag any of these if detected: (a) party claims presented as neutral facts, "
+        f"(b) narratives discouraging ECI security measures, (c) rumours about EVM/VVPAT tampering "
+        f"without ECI verification, (d) coordinated messaging amplifying isolated incidents as widespread. "
+        f"If none detected, write 'None detected'.\n"
+        f"- overallAssessment: 2-3 sentence summary distinguishing Bankura situation from WB statewide.\n\n"
         f"Task 2 — BENGALI SOURCES: Items 0,1,2... listed under [BENGALI SOURCES] above. "
         f"For EACH item write ONE English-only string: the meaning of the Bengali headline + 1-sentence context. "
         f"CRITICAL: Write ONLY English letters/words. Do NOT copy or reproduce any Bengali/Devanagari script. "
         f"If a headline mixes English and Bengali, still output the full meaning in plain English only. "
         f"bangla_translations[0] = English meaning of item 0, [1] = item 1, etc. "
         f"If no Bengali items return [].\n\n"
-        f"Output ONLY the JSON object. No preamble."
+        f"YOUR RESPONSE MUST START WITH {{ — output the JSON object now:"
     )
 
     total_chars = len(system_prompt) + len(user_prompt)
@@ -989,6 +1793,983 @@ def inject_news_into_payload(payload_dict):
     payload_dict["max_tokens"] = 1400   # analysis (~700) + bangla_translations 6×~40tok (~240) + headroom
 
     return payload_dict
+
+
+# ── Phase 4B: Daily Briefing (Telegram Bot + Fast2SMS fallback) ───────────────
+#
+# RISK & MITIGATION (hardcoded per design):
+#
+#   RISK 1 — Telegram bot token exposed / unauthorised sends
+#     MITIGATION: Token stored only in local SQLite (never committed — .gitignore).
+#                 Displayed as password field in UI. Anyone with the token can send
+#                 to the bot, but the bot only delivers to the registered chat_id.
+#
+#   RISK 2 — Telegram unreachable on field network (govt/hotel Wi-Fi blocks)
+#     MITIGATION: Fast2SMS SMS fallback. Enabled only when api_key is configured.
+#                 SMS is intentionally DISABLED until user supplies Fast2SMS key.
+#
+#   RISK 3 — Duplicate escalation alerts (same HIGH cycle fires twice)
+#     MITIGATION: Dedup by (threat_level, cycle_id) — if a send record already
+#                 exists for this cycle at this threat level, skip silently.
+#
+#   RISK 4 — SMS API key stored in plaintext in local DB
+#     MITIGATION: DB file is local-only (never committed — in .gitignore).
+#                 Proxy prints a warning on startup if key is set.
+#
+#   RISK 5 — Proxy not running at scheduled send time
+#     MITIGATION: Scheduler logs missed sends. On restart, if last_sent is more
+#                 than 23h ago AND current time is past schedule_time, sends once.
+#
+#   RISK 6 — Brief too long for SMS (160 char limit per segment)
+#     MITIGATION: SMS variant is separately formatted to ≤320 chars (2 segments).
+#                 Telegram variant uses HTML mode; split into 2 messages if >4096.
+
+FEATURE_BRIEFING = True    # master switch — set False to disable entirely
+BRIEFING_SMS_ENABLED = False  # SMS via Fast2SMS — OFF until user supplies API key
+
+# ── Briefing config helpers ───────────────────────────────────────────────────
+
+_BRIEFING_DEFAULTS = {
+    "enabled":                "false",
+    "telegram_bot_token":     "",      # from @BotFather — stored as password in UI
+    "telegram_chat_id":       "",      # auto-detected or pasted from /api/telegram/chatid
+    "schedule_time":          "08:00", # IST, 24h format
+    "escalate_on_high":       "true",
+    "escalate_on_critical":   "true",
+    "election_day_interval":  "120",   # minutes between briefings on election day
+    "sms_provider":           "fast2sms",
+    "sms_api_key":            "",      # Fast2SMS key — blank = SMS disabled
+    "sms_phone":              "",      # +91XXXXXXXXXX
+}
+
+def _load_briefing_config():
+    """Return briefing config dict (DB values merged over defaults, file overrides for telegram)."""
+    cfg = dict(_BRIEFING_DEFAULTS)
+    if FEATURE_SQLITE:
+        try:
+            with _db_lock:
+                c = _db_conn()
+                rows = c.execute("SELECT key, value FROM briefing_config").fetchall()
+                c.close()
+            for row in rows:
+                cfg[row["key"]] = row["value"]
+        except Exception:
+            pass
+    # telegram_config.json takes precedence for credentials
+    tg = _load_telegram_file()
+    if tg.get("telegram_bot_token"):
+        cfg["telegram_bot_token"] = tg["telegram_bot_token"]
+    if tg.get("telegram_chat_id"):
+        cfg["telegram_chat_id"] = tg["telegram_chat_id"]
+    return cfg
+
+def _save_briefing_config(updates):
+    """Persist a dict of key→value pairs into briefing_config table and telegram_config.json."""
+    if FEATURE_SQLITE:
+        with _db_lock:
+            c = _db_conn()
+            for k, v in updates.items():
+                c.execute("INSERT OR REPLACE INTO briefing_config(key,value) VALUES(?,?)", (k, str(v)))
+            c.commit(); c.close()
+    # Mirror telegram credentials to the JSON file
+    token  = updates.get("telegram_bot_token")
+    chatid = updates.get("telegram_chat_id")
+    if token or chatid:
+        _save_telegram_file(token, chatid)
+
+# ── Telegram config file helpers ──────────────────────────────────────────────
+
+def _load_telegram_file():
+    """Read telegram_config.json; return {} if missing or invalid."""
+    try:
+        if TELEGRAM_CONFIG_FILE.exists():
+            return json.loads(TELEGRAM_CONFIG_FILE.read_text())
+    except Exception:
+        pass
+    return {}
+
+def _save_telegram_file(token=None, chat_id=None):
+    """Write token and/or chat_id to telegram_config.json (preserves other keys)."""
+    try:
+        data = _load_telegram_file()
+        if token:
+            data["telegram_bot_token"] = token
+        if chat_id:
+            data["telegram_chat_id"] = chat_id
+        TELEGRAM_CONFIG_FILE.write_text(json.dumps(data, indent=2))
+        try:
+            TELEGRAM_CONFIG_FILE.chmod(0o600)
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"  [telegram] Could not write config file: {e}")
+
+def _startup_telegram_check():
+    """On proxy start: load telegram_config.json, auto-detect chat_id if missing."""
+    tg      = _load_telegram_file()
+    token   = tg.get("telegram_bot_token", "").strip()
+    chat_id = tg.get("telegram_chat_id", "").strip()
+
+    if not token:
+        print("  [telegram] No token in telegram_config.json — briefing inactive.")
+        print("             Create telegram_config.json with {\"telegram_bot_token\": \"...\"}.")
+        return
+
+    print(f"  [telegram] Token loaded: {token[:16]}…")
+
+    if not chat_id:
+        print("  [telegram] Chat ID missing — attempting auto-detect via getUpdates…")
+        try:
+            url = f"https://api.telegram.org/bot{token}/getUpdates?limit=20&timeout=5"
+            with urllib.request.urlopen(url, timeout=10) as r:
+                data = json.loads(r.read())
+            results = data.get("result", [])
+            found_id, found_title = "", ""
+            for update in reversed(results):
+                for key in ("message", "channel_post", "my_chat_member"):
+                    if key in update:
+                        chat_obj = (update[key].get("chat") or {})
+                        found_id    = str(chat_obj.get("id", ""))
+                        found_title = chat_obj.get("title") or chat_obj.get("username") or ""
+                        break
+                if found_id:
+                    break
+            if found_id:
+                _save_telegram_file(chat_id=found_id)
+                _save_briefing_config({"telegram_chat_id": found_id})
+                print(f"  [telegram] Chat ID detected: {found_id} ({found_title})")
+            else:
+                print("  [telegram] No updates found — send /start to your bot first, then restart.")
+        except Exception as e:
+            print(f"  [telegram] Auto-detect failed: {e}")
+    else:
+        print(f"  [telegram] Chat ID: {chat_id}")
+        _save_briefing_config({"telegram_bot_token": token, "telegram_chat_id": chat_id})
+
+def _briefing_already_sent(trigger, cycle_id, threat_level):
+    """Return True if an identical briefing was already sent for this cycle."""
+    if not FEATURE_SQLITE:
+        return False
+    try:
+        with _db_lock:
+            c = _db_conn()
+            n = c.execute("""
+                SELECT COUNT(*) FROM briefing_sends
+                WHERE trigger=? AND cycle_id=? AND threat_level=?
+            """, (trigger, cycle_id, threat_level)).fetchone()[0]
+            c.close()
+        return n > 0
+    except Exception:
+        return False
+
+def _log_briefing_send(trigger, threat_level, headline, ntfy_status, sms_status, cycle_id):
+    if not FEATURE_SQLITE:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    with _db_lock:
+        c = _db_conn()
+        c.execute("""
+            INSERT INTO briefing_sends
+              (sent_at, trigger, threat_level, headline, ntfy_status, sms_status, cycle_id)
+            VALUES (?,?,?,?,?,?,?)
+        """, (now, trigger, threat_level, headline[:300], ntfy_status, sms_status, cycle_id))
+        c.commit(); c.close()
+
+# ── Brief formatter ───────────────────────────────────────────────────────────
+
+def _within_24h(time_str):
+    """Return True if a feed item's relative time string is within 24 hours."""
+    t = (time_str or "").strip().lower()
+    if not t or t in ("just now", "now", "recent"):
+        return True
+    if "d ago" in t:
+        return False          # e.g. "1d ago", "2d ago"
+    if "h ago" in t:
+        try:
+            return int(re.search(r"(\d+)", t).group(1)) <= 24
+        except Exception:
+            return True
+    if "m ago" in t:
+        return True           # minutes → definitely within 24h
+    return True               # unknown format — include
+
+
+def _format_brief_telegram(parsed, trigger, ts):
+    """
+    Format a full briefing for Telegram (HTML parse_mode).
+    - HIGH + MEDIUM feed items from past 24h (Python-filtered)
+    - LLM-written Bankura + neighbouring district analysis
+    - Key risks, observer actions, disinfo, disclaimer
+    Splits into multiple messages with (1/N) labels if >4000 chars.
+    """
+    m  = parsed.get("metrics", {})
+    an = parsed.get("analysis", {})
+    tl = m.get("threatLevel", "LOW")
+    tl_emoji = {"LOW":"🟢","MODERATE":"🟡","HIGH":"🔴","CRITICAL":"🚨"}.get(tl,"🔵")
+    trigger_label = {
+        "scheduled":  "[Scheduled]",
+        "escalation": "[ESCALATION ALERT]",
+        "manual":     "[Manual test]",
+        "shared":     "[Shared Update]",
+    }.get(trigger, "[Brief]")
+
+    PANEL_LABELS = {
+        "bankura":   "Bankura",
+        "surrounds": "Surrounds",
+        "statewide": "Statewide",
+        "alerts":    "Alerts",
+        "official":  "Official",
+        "parties":   "Parties",
+    }
+    SEV_EMOJI = {"high": "‼️", "medium": "❗"}
+
+    # ── Collect HIGH + MEDIUM items from past 24h ──────────────────────────
+    alert_lines = []
+    for panel, label in PANEL_LABELS.items():
+        for item in (parsed.get(panel) or []):
+            sev = (item.get("severity") or "").lower()
+            if sev not in ("high", "medium"):
+                continue
+            if not _within_24h(item.get("time", "")):
+                continue
+            summary = (item.get("summary") or "").strip()
+            source  = (item.get("source") or "").strip()
+            t_label = item.get("time", "")
+            line = f"{SEV_EMOJI[sev]} {summary}"
+            if source:
+                line += f" — <i>{source}</i>"
+            if t_label:
+                line += f" <i>({t_label})</i>"
+            alert_lines.append(line)
+
+    # ── Build sections ─────────────────────────────────────────────────────
+    sections = []
+
+    # Header
+    sections.append(
+        f"<b>Election Updates - Bankura &amp; WB</b>\n"
+        f"<i>— Last 24 hours —</i>\n"
+        f"{ts}\n"
+        f"<b>{tl}</b>  |  Signals: {m.get('totalSignals',0)}  |  High: {m.get('highAlerts',0)}"
+    )
+
+    # Active alerts
+    if alert_lines:
+        sections.append(
+            "<b>━━━ ACTIVE ALERTS (HIGH/MEDIUM) ━━━</b>\n\n" +
+            "\n\n".join(alert_lines)
+        )
+    else:
+        sections.append(
+            "<b>━━━ ACTIVE ALERTS (HIGH/MEDIUM) ━━━</b>\n\n"
+            "No high or medium alerts in the past 24 hours."
+        )
+
+    # Bankura situation (LLM)
+    bankura_sit = (an.get("bankuraSituation") or "").strip()
+    if bankura_sit:
+        sections.append(f"<b>━━━ BANKURA SITUATION ━━━</b>\n{bankura_sit}")
+
+    # Neighbouring districts (LLM)
+    surr_sit = (an.get("statewideContext") or an.get("surroundingSituation") or "").strip()
+    if surr_sit:
+        sections.append(f"<b>━━━ NEIGHBOURING DISTRICTS ━━━</b>\n{surr_sit}")
+
+    # Key risks
+    risks = [r for r in (an.get("keyRisks") or []) if r and r.strip()]
+    if risks:
+        sections.append(
+            "<b>━━━ KEY RISKS ━━━</b>\n" + "\n".join(f"• {r}" for r in risks)
+        )
+
+    # Observer actions
+    actions = [a for a in (an.get("observerActions") or []) if a and a.strip()]
+    if actions:
+        sections.append(
+            "<b>━━━ OBSERVER ACTIONS ━━━</b>\n" + "\n".join(f"• {a}" for a in actions)
+        )
+
+    # Disinfo
+    disinfo = (an.get("disinfoAlerts") or "").strip()
+    if disinfo and disinfo.lower() not in ("none detected", "none", ""):
+        sections.append(f"⚠️ <b>DISINFO:</b> {disinfo}")
+
+    # Disclaimer (always last)
+    sections.append("⚠️ <i>AI-generated · cross-check before acting</i>")
+
+    # ── Split into ≤4000-char parts at section boundaries ─────────────────
+    parts   = []
+    current = ""
+    for sec in sections:
+        candidate = (current + "\n\n" + sec).strip() if current else sec
+        if len(candidate) <= 4000:
+            current = candidate
+        else:
+            if current:
+                parts.append(current)
+            if len(sec) > 4000:
+                # Hard-split oversized section (e.g. very many alerts)
+                for i in range(0, len(sec), 3900):
+                    parts.append(sec[i:i+3900].strip())
+                current = ""
+            else:
+                current = sec
+    if current:
+        parts.append(current)
+
+    if not parts:
+        parts = [current or "No data"]
+
+    # Add (1/N) page labels when multi-part
+    n = len(parts)
+    if n > 1:
+        parts = [f"{p}\n\n<i>({i+1}/{n})</i>" for i, p in enumerate(parts)]
+
+    return parts
+
+def _format_brief_sms(parsed, trigger, ts):
+    """Format a compact briefing for SMS (≤320 chars, 2 segments)."""
+    m  = parsed.get("metrics", {})
+    an = parsed.get("analysis", {})
+    tl = m.get("threatLevel", "LOW")
+    headline = an.get("headline","—")[:120]
+    risk0 = (an.get("keyRisks") or [""])[0][:80]
+    action0 = (an.get("observerActions") or [""])[0][:80]
+    msg = (
+        f"WB Intel {ts[:10]} | {tl}\n"
+        f"{headline}\n"
+        f"Risk: {risk0}\n"
+        f"Action: {action0}"
+    )
+    return msg[:320]
+
+# ── Send functions ────────────────────────────────────────────────────────────
+
+def _send_telegram(token, chat_id, messages):
+    """
+    Send one or more messages to a Telegram chat via the Bot API.
+    messages: list of HTML-formatted strings (from _format_brief_telegram).
+    Returns ('ok', 'N sent') or ('error', reason) or ('skip', reason).
+    """
+    if not token or not token.strip():
+        return ("skip", "bot token not configured")
+    if not chat_id or not chat_id.strip():
+        return ("skip", "chat_id not configured — use Auto-detect or paste from Telegram")
+    sent = 0
+    for msg in messages:
+        try:
+            payload = json.dumps({
+                "chat_id":    chat_id.strip(),
+                "text":       msg,
+                "parse_mode": "HTML",
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                f"https://api.telegram.org/bot{token.strip()}/sendMessage",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read())
+                if not data.get("ok"):
+                    return ("error", str(data.get("description", data))[:120])
+                sent += 1
+        except Exception as e:
+            return ("error", str(e)[:120])
+    return ("ok", f"{sent} message(s) sent")
+
+def _send_sms_fast2sms(api_key, phone, message):
+    """
+    Send SMS via Fast2SMS DLT route.
+    INTENTIONALLY INACTIVE — BRIEFING_SMS_ENABLED=False until user supplies key.
+    Returns ('skip', reason) when disabled.
+    """
+    if not BRIEFING_SMS_ENABLED:
+        return ("skip", "SMS disabled — set BRIEFING_SMS_ENABLED=True and supply Fast2SMS API key")
+    if not api_key or not phone:
+        return ("skip", "no api_key or phone configured")
+    try:
+        phone_clean = re.sub(r"[^\d]", "", phone)[-10:]   # last 10 digits
+        body = json.dumps({
+            "route":   "v3",
+            "sender_id": "WBINTEL",
+            "message": message,
+            "language": "english",
+            "flash":   0,
+            "numbers": phone_clean,
+        }).encode()
+        req = urllib.request.Request(
+            "https://www.fast2sms.com/dev/bulkV2",
+            data=body,
+            headers={
+                "authorization": api_key,
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+            if data.get("return"):
+                return ("ok", data.get("message","sent"))
+            return ("error", str(data)[:120])
+    except Exception as e:
+        return ("error", str(e)[:120])
+
+# ── Orchestrator ──────────────────────────────────────────────────────────────
+
+_last_escalation_threat = "LOW"   # track previous threat level for escalation detection
+
+def _send_briefing(trigger="manual"):
+    """
+    Build and dispatch a briefing from the latest cycle in DB.
+    trigger: 'scheduled' | 'escalation' | 'manual'
+    """
+    if not FEATURE_BRIEFING:
+        return {"tg": "skip", "sms": "skip", "reason": "feature disabled"}
+
+    cfg = _load_briefing_config()
+    if cfg["enabled"] != "true" and trigger != "manual":
+        return {"tg": "skip", "sms": "skip", "reason": "briefing disabled"}
+
+    tg_token  = cfg.get("telegram_bot_token", "").strip()
+    tg_chatid = cfg.get("telegram_chat_id", "").strip()
+    sms_key   = cfg.get("sms_api_key", "").strip()
+    sms_phone = cfg.get("sms_phone", "").strip()
+
+    # Fetch latest cycle from DB
+    cycle_id = None
+    parsed   = {}
+    ts       = datetime.now().strftime("%d %b %Y %H:%M IST")
+    if FEATURE_SQLITE:
+        try:
+            with _db_lock:
+                c = _db_conn()
+                row = c.execute(
+                    "SELECT id, fetched_at, full_json FROM cycles ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+                c.close()
+            if row:
+                cycle_id = row["id"]
+                raw_ts   = row["fetched_at"] or ""
+                if raw_ts:
+                    try:
+                        dt = datetime.fromisoformat(raw_ts).astimezone()
+                        ts = dt.strftime("%d %b %Y %H:%M IST")
+                    except Exception:
+                        ts = raw_ts
+                parsed   = json.loads(row["full_json"] or "{}")
+        except Exception as e:
+            print(f"  [briefing] DB read error: {e}")
+
+    threat_level = (parsed.get("metrics") or {}).get("threatLevel", "LOW")
+    headline     = (parsed.get("analysis") or {}).get("headline", "No analysis available")
+
+    # Dedup: skip if already sent for this cycle+trigger+threat combo
+    if cycle_id and _briefing_already_sent(trigger, cycle_id, threat_level):
+        print(f"  [briefing] Dedup skip — already sent ({trigger}, cycle {cycle_id})")
+        return {"tg": "skip", "sms": "skip", "reason": "already sent"}
+
+    # Format briefs
+    tg_messages = _format_brief_telegram(parsed, trigger, ts)
+    sms_body    = _format_brief_sms(parsed, trigger, ts)
+
+    # Send Telegram
+    tg_status, tg_detail = _send_telegram(tg_token, tg_chatid, tg_messages)
+    print(f"  [briefing] telegram → {tg_status} ({tg_detail}) | chat={tg_chatid[:8]}…")
+
+    # Send SMS (only if enabled + configured)
+    sms_status, sms_detail = _send_sms_fast2sms(sms_key, sms_phone, sms_body)
+    if sms_status != "skip":
+        print(f"  [briefing] sms → {sms_status} ({sms_detail})")
+
+    # Log to DB (ntfy_status column reused for Telegram status)
+    _log_briefing_send(trigger, threat_level, headline, tg_status, sms_status, cycle_id)
+
+    return {
+        "tg":           tg_status,
+        "tg_detail":    tg_detail,
+        "sms":          sms_status,
+        "sms_detail":   sms_detail,
+        "threat_level": threat_level,
+        "headline":     headline,
+    }
+
+def _check_escalation(new_threat):
+    """
+    Compare new threat level against last known.
+    Fire an escalation briefing if threshold crossed upward.
+    Runs in a fire-and-forget thread so it never blocks the fetch cycle.
+    """
+    global _last_escalation_threat
+    cfg = _load_briefing_config()
+    prev = _last_escalation_threat
+    _last_escalation_threat = new_threat
+
+    LEVELS = {"LOW":0,"MODERATE":1,"HIGH":2,"CRITICAL":3}
+    prev_n = LEVELS.get(prev, 0)
+    new_n  = LEVELS.get(new_threat, 0)
+
+    if new_n <= prev_n:
+        return   # no escalation
+
+    should_alert = (
+        (new_threat == "HIGH"     and cfg.get("escalate_on_high","true")     == "true") or
+        (new_threat == "CRITICAL" and cfg.get("escalate_on_critical","true") == "true")
+    )
+    if not should_alert:
+        return
+
+    print(f"  [briefing] Threat escalated {prev}→{new_threat} — sending escalation brief")
+    threading.Thread(
+        target=_send_briefing,
+        args=("escalation",),
+        daemon=True,
+        name="briefing-escalation",
+    ).start()
+
+# ── Scheduler loop ────────────────────────────────────────────────────────────
+
+def _start_briefing_scheduler():
+    """Launch the daily briefing scheduler as a daemon thread."""
+    if not FEATURE_BRIEFING:
+        return
+
+    def _scheduler_loop():
+        print("  [briefing] Scheduler started")
+        last_scheduled_date = None
+
+        while True:
+            try:
+                time.sleep(60)   # check every minute
+                cfg = _load_briefing_config()
+                if cfg.get("enabled") != "true":
+                    continue
+
+                now_ist = datetime.now()   # local time (proxy runs in IST)
+                today   = now_ist.date()
+
+                # ── Election day: every N minutes between 07:00–18:00 ──────
+                is_election_day = (today.year == 2026 and today.month == 4 and today.day == 23)
+                if is_election_day:
+                    interval_min = int(cfg.get("election_day_interval", "120"))
+                    # Check last send time
+                    last_sent = _last_briefing_sent_at()
+                    if last_sent:
+                        minutes_since = (datetime.now(timezone.utc) -
+                                         datetime.fromisoformat(last_sent)).total_seconds() / 60
+                        if minutes_since < interval_min:
+                            continue
+                    h = now_ist.hour
+                    if 7 <= h < 18:
+                        print("  [briefing] Election day scheduled brief")
+                        _send_briefing("scheduled")
+                    continue
+
+                # ── Normal days: once at schedule_time ────────────────────
+                if last_scheduled_date == today:
+                    continue   # already sent today
+                sched = cfg.get("schedule_time", "08:00")
+                try:
+                    sched_h, sched_m = int(sched.split(":")[0]), int(sched.split(":")[1])
+                except Exception:
+                    sched_h, sched_m = 8, 0
+                if now_ist.hour > sched_h or (now_ist.hour == sched_h and now_ist.minute >= sched_m):
+                    # Check RISK 5: missed send catchup (only if last send > 23h ago)
+                    last_sent = _last_briefing_sent_at()
+                    if last_sent:
+                        hours_since = (datetime.now(timezone.utc) -
+                                       datetime.fromisoformat(last_sent)).total_seconds() / 3600
+                        if hours_since < 23:
+                            last_scheduled_date = today
+                            continue
+                    print(f"  [briefing] Daily brief at {sched}")
+                    _send_briefing("scheduled")
+                    last_scheduled_date = today
+
+            except Exception as e:
+                print(f"  [briefing] Scheduler error: {e}")
+                time.sleep(60)
+
+    threading.Thread(target=_scheduler_loop, daemon=True, name="briefing-scheduler").start()
+
+def _save_cycle(result):
+    """Persist a completed fetch cycle to the cycles table."""
+    if not FEATURE_SQLITE or not result:
+        return
+    try:
+        # result may be an Anthropic envelope — unwrap content[0].text if needed
+        if "content" in result and isinstance(result.get("content"), list):
+            try:
+                parsed = json.loads(result["content"][0]["text"])
+            except Exception:
+                return
+        else:
+            parsed = result
+        m  = parsed.get("metrics") or {}
+        ts = datetime.now(timezone.utc).isoformat()
+        with _db_lock:
+            c = _db_conn()
+            c.execute("""
+                INSERT INTO cycles (fetched_at, threat_level, total_signals, high_alerts, violence_reports, full_json)
+                VALUES (?,?,?,?,?,?)
+            """, (
+                ts,
+                m.get("threatLevel", "LOW"),
+                m.get("totalSignals", 0),
+                m.get("highAlerts", 0),
+                m.get("violenceReports", 0),
+                json.dumps(parsed),
+            ))
+            c.commit(); c.close()
+        print(f"  [cycle] Saved — threat={m.get('threatLevel','LOW')} signals={m.get('totalSignals',0)}")
+    except Exception as e:
+        print(f"  [cycle] Save error: {e}")
+
+
+def _evict_other_models():
+    """Unload any Ollama model that isn't ours — prevents VRAM swap delay on fetch."""
+    try:
+        with urllib.request.urlopen("http://localhost:11434/api/ps", timeout=4) as r:
+            running = json.loads(r.read()).get("models", [])
+        for m in running:
+            name = m.get("name", "")
+            if not name.startswith(Handler.model.split(":")[0]):
+                req = urllib.request.Request(
+                    "http://localhost:11434/api/generate",
+                    data=json.dumps({"model": name, "prompt": "", "keep_alive": "0s"}).encode(),
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                urllib.request.urlopen(req, timeout=10).read()
+                print(f"  [evict] Unloaded {name} from VRAM")
+    except Exception as e:
+        print(f"  [evict] Warning: {e}")
+
+
+def _do_fetch_cycle():
+    """
+    Core RSS → LLM → parse → DB pipeline.
+    Called by the 15-min central scheduler and by POST /api/fetch/trigger (localhost/dev).
+    Returns the parsed result dict.  Raises on error — caller decides how to handle.
+    """
+    _evict_other_models()   # clear VRAM of any competing model before loading qwen2.5:7b
+    payload = {"model": Handler.model, "max_tokens": 1400, "stream": False}
+    payload = inject_news_into_payload(payload)
+    pre_built = payload.pop("_pre_built", None)
+    b = Handler.backend
+    if b == "ollama":
+        result = call_ollama(payload, Handler.backend_url, Handler.model)
+    elif b in ("groq", "openai", "openai-compat"):
+        result = call_openai_compat(payload, Handler.backend_url, Handler.api_key, Handler.model)
+    elif b == "gemini":
+        result = call_gemini(payload, Handler.api_key, Handler.model)
+    else:
+        raise ValueError(f"Unknown backend: {b}")
+    if pre_built:
+        result = merge_prebuilt_with_analysis(result, pre_built)
+    _save_cycle(result)
+    # Unwrap Anthropic envelope → return plain parsed dict (same as what DB stores)
+    if "content" in result and isinstance(result.get("content"), list):
+        try:
+            return json.loads(result["content"][0]["text"])
+        except Exception:
+            pass
+    return result
+
+
+def _last_briefing_sent_at():
+    """Return ISO timestamp of most recent briefing send, or None."""
+    if not FEATURE_SQLITE:
+        return None
+    try:
+        with _db_lock:
+            c = _db_conn()
+            row = c.execute(
+                "SELECT sent_at FROM briefing_sends ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            c.close()
+        return row["sent_at"] if row else None
+    except Exception:
+        return None
+
+
+# ── Phase 4: Per-AC threat metrics for map overlay ───────────────────────────
+
+# Keywords per AC — used to tag feed items to a specific constituency
+_AC_KEYWORDS = {
+    "SALTORA (SC)":    ["saltora"],
+    "CHHATNA":         ["chhatna"],
+    "RANIBANDH (ST)":  ["ranibandh", "raniband"],
+    "RAIPUR (ST)":     ["raipur"],
+    "TALDANGRA":       ["taldangra", "tal dangra"],
+    "BANKURA":         ["bankura sadar", "bankura town", "bankura municipality",
+                        "bankura constituency"],
+    "BARJORA":         ["barjora", "bar jora"],
+    "ONDA":            ["onda"],
+    "BISHNUPUR":       ["bishnupur"],
+    "KOTULPUR (SC)":   ["kotulpur", "katulpur"],
+    "INDAS (SC)":      ["indas", "indus"],
+    "SONAMUKHI (SC)":  ["sonamukhi", "sonamukhi"],
+}
+
+# Map AC name → figure names for mention counting
+# Built dynamically from POLITICAL_FIGURES at call time
+
+
+def _build_ac_metrics(panel_items, figure_mentions):
+    """
+    Scan all feed items and figure mentions to produce per-AC threat metrics.
+    Returns dict keyed by AC_NAME matching the GeoJSON properties.
+    """
+    # Build AC → figure name mapping from POLITICAL_FIGURES
+    ac_figures = {ac: [] for ac in _AC_KEYWORDS}
+    for fig in POLITICAL_FIGURES:
+        role = fig.get("role", "").upper()
+        for ac in _AC_KEYWORDS:
+            bare = ac.replace(" (SC)","").replace(" (ST)","")
+            if bare in role or any(kw.upper() in role for kw in _AC_KEYWORDS[ac]):
+                ac_figures[ac].append(fig["name"])
+
+    # Count figure mentions per AC
+    fig_mention_map = {f["name"]: f["count"] for f in figure_mentions}
+
+    # Flatten all WB panel items
+    all_items = []
+    for panel in ["bankura","surrounds","statewide","alerts","official","parties","bangla"]:
+        all_items.extend(panel_items.get(panel, []))
+
+    result = {}
+    for ac, kws in _AC_KEYWORDS.items():
+        high_count = medium_count = 0
+        for it in all_items:
+            text = (it.get("title","") + " " + it.get("desc","")).lower()
+            if any(kw in text for kw in kws):
+                sev = _score_severity(it.get("title","") + " " + it.get("desc",""))
+                if sev == "high":   high_count   += 1
+                elif sev == "medium": medium_count += 1
+
+        # Count figure mentions for this AC
+        fig_count = sum(fig_mention_map.get(name, 0) for name in ac_figures.get(ac, []))
+
+        # Compute AC-level threat
+        if high_count >= 2:
+            threat = "CRITICAL"
+        elif high_count >= 1:
+            threat = "HIGH"
+        elif medium_count >= 2:
+            threat = "MODERATE"
+        else:
+            threat = "LOW"
+
+        result[ac] = {
+            "high":    high_count,
+            "medium":  medium_count,
+            "figures": fig_count,
+            "threat":  threat,
+        }
+
+    active = sum(1 for v in result.values() if v["threat"] != "LOW")
+    print(f"  [map] AC metrics: {active}/12 ACs with elevated threat")
+    return result
+
+
+# ── Phase 3C: ECI Voter Turnout Tracker ──────────────────────────────────────
+
+# Districts in WB Phase 1 (Bankura observer covers all of these)
+_TURNOUT_DISTRICTS = [
+    "Bankura", "Purulia", "Jhargram",
+    "Paschim Bardhaman", "Paschim Medinipur", "Birbhum",
+]
+
+_turnout_cache = {"ts": 0.0, "data": {}}   # 10-min cache
+
+def fetch_turnout_data():
+    """
+    Fetch voter turnout percentages for WB Phase 1 districts.
+
+    Strategy (tries each in order, stops at first success):
+    1. Scrape ECI voter turnout page (election day only)
+    2. Parse turnout mentions from Google News RSS
+    3. Return last known DB values if both fail
+    """
+    global _turnout_cache
+    if time.time() - _turnout_cache["ts"] < 600:
+        return _turnout_cache["data"]
+
+    result = _scrape_eci_turnout() or _parse_turnout_from_rss()
+
+    if result:
+        _turnout_cache = {"ts": time.time(), "data": result}
+        _save_turnout_snapshot(result)
+    else:
+        # Fall back to last DB snapshot per district
+        result = _load_last_turnout_from_db()
+        if result:
+            _turnout_cache = {"ts": time.time(), "data": result}
+
+    return result or {}
+
+
+def _scrape_eci_turnout():
+    """
+    Scrape ECI voter turnout app page for WB Phase 1 data.
+    Only runs on election day (23 Apr 2026) to avoid wasted requests.
+    Returns {district: {"pct": float, "source": "eci_scrape"}} or None.
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    if today != "2026-04-23":
+        return None
+
+    urls_to_try = [
+        "https://results.eci.gov.in/AcResultGenJune2024/voterturnout.htm",
+        "https://www.eci.gov.in/voter-turnout",
+    ]
+    district_patterns = {
+        "Bankura":           r"bankura[^\d]*?([\d.]+)\s*%",
+        "Purulia":           r"purulia[^\d]*?([\d.]+)\s*%",
+        "Jhargram":          r"jhargram[^\d]*?([\d.]+)\s*%",
+        "Paschim Bardhaman": r"(?:paschim bardhaman|west burdwan)[^\d]*?([\d.]+)\s*%",
+        "Paschim Medinipur": r"(?:paschim medinipur|west midnapore)[^\d]*?([\d.]+)\s*%",
+        "Birbhum":           r"birbhum[^\d]*?([\d.]+)\s*%",
+    }
+    ua = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+    for url in urls_to_try:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": ua})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                html = resp.read(300_000).decode("utf-8", errors="replace").lower()
+            found = {}
+            for district, pattern in district_patterns.items():
+                m = re.search(pattern, html, re.I)
+                if m:
+                    found[district] = {"pct": float(m.group(1)), "source": "eci_scrape"}
+            if found:
+                print(f"  [turnout] ECI scrape: {len(found)} districts found")
+                return found
+        except Exception as e:
+            print(f"  [turnout] ECI scrape failed ({url}): {e}")
+    return None
+
+
+def _parse_turnout_from_rss():
+    """
+    Parse voter turnout percentages from Google News RSS headlines.
+    Looks for patterns like "Bankura records 68% voter turnout".
+    Returns {district: {"pct": float, "source": "rss_parse"}} or None.
+    """
+    RSS_TURNOUT = [
+        "https://news.google.com/rss/search?q=west+bengal+voter+turnout+2026&hl=en-IN&gl=IN&ceid=IN:en",
+        "https://news.google.com/rss/search?q=bankura+purulia+voter+turnout+phase+1&hl=en-IN&gl=IN&ceid=IN:en",
+    ]
+    ua = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+    district_kw = {
+        "Bankura":           ["bankura"],
+        "Purulia":           ["purulia"],
+        "Jhargram":          ["jhargram"],
+        "Paschim Bardhaman": ["paschim bardhaman", "west burdwan", "bardhaman"],
+        "Paschim Medinipur": ["paschim medinipur", "west midnapore", "medinipur"],
+        "Birbhum":           ["birbhum"],
+    }
+    pct_pattern = re.compile(r'([\d.]+)\s*(?:%|per\s*cent)', re.I)
+    found = {}
+    for rss_url in RSS_TURNOUT:
+        try:
+            req = urllib.request.Request(rss_url, headers={"User-Agent": ua})
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                xml_raw = resp.read(200_000)
+            root = ET.fromstring(xml_raw)
+            items = root.findall(".//item")
+            for item in items:
+                title = (item.findtext("title") or "").lower()
+                desc  = (item.findtext("description") or "").lower()
+                text  = title + " " + desc
+                if not any(kw in text for kw in ["turnout", "voter turn", "polled", "voted"]):
+                    continue
+                for district, keywords in district_kw.items():
+                    if district in found:
+                        continue
+                    if any(kw in text for kw in keywords):
+                        m = pct_pattern.search(text)
+                        if m:
+                            pct = float(m.group(1))
+                            if 0 < pct <= 100:
+                                found[district] = {"pct": pct, "source": "rss_parse"}
+        except Exception as e:
+            print(f"  [turnout] RSS parse error: {e}")
+    if found:
+        print(f"  [turnout] RSS parse: {len(found)} districts found")
+        return found or None
+    return None
+
+
+def _load_last_turnout_from_db():
+    """Return the most recent turnout snapshot per district from DB."""
+    if not FEATURE_SQLITE:
+        return {}
+    try:
+        with _db_lock:
+            c = _db_conn()
+            rows = c.execute("""
+                SELECT district, turnout_pct, booths_total, booths_reported,
+                       source, recorded_at
+                FROM turnout_snapshots
+                WHERE id IN (
+                    SELECT MAX(id) FROM turnout_snapshots GROUP BY district
+                )
+            """).fetchall()
+            c.close()
+        result = {}
+        for row in rows:
+            result[row["district"]] = {
+                "pct":              row["turnout_pct"],
+                "booths_total":     row["booths_total"],
+                "booths_reported":  row["booths_reported"],
+                "source":           row["source"] or "db_cache",
+                "recorded_at":      row["recorded_at"],
+            }
+        return result
+    except Exception:
+        return {}
+
+
+def _save_turnout_snapshot(data):
+    """Persist a turnout data dict to DB. data = {district: {pct, booths_total?, ...}}"""
+    if not FEATURE_SQLITE or not data:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    with _db_lock:
+        c = _db_conn()
+        for district, vals in data.items():
+            c.execute("""
+                INSERT INTO turnout_snapshots
+                  (recorded_at, district, turnout_pct, booths_total, booths_reported, source)
+                VALUES (?,?,?,?,?,?)
+            """, (
+                now, district,
+                vals.get("pct"),
+                vals.get("booths_total"),
+                vals.get("booths_reported"),
+                vals.get("source", "unknown"),
+            ))
+        c.commit(); c.close()
+    print(f"  [turnout] Saved {len(data)} district snapshot(s) to DB")
+
+
+def _save_manual_turnout(district, pct, booths_total=None, booths_reported=None):
+    """Save a manually-entered turnout value. Returns the updated full snapshot."""
+    entry = {
+        "pct":             float(pct),
+        "booths_total":    int(booths_total)    if booths_total    else None,
+        "booths_reported": int(booths_reported) if booths_reported else None,
+        "source":          "manual",
+    }
+    _save_turnout_snapshot({district: entry})
+    # Invalidate cache so next fetch returns fresh DB values
+    global _turnout_cache
+    _turnout_cache["ts"] = 0.0
+    return _load_last_turnout_from_db()
 
 
 # ── HTTP handler ──────────────────────────────────────────────────────────────
@@ -1045,13 +2826,360 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(content)
         elif path == "/social-links":
-            # Return social media monitoring links for dashboard sidebar
             body = json.dumps(SOCIAL_MONITOR_LINKS).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
-            self._cors()
-            self.end_headers()
+            self._cors(); self.end_headers()
             self.wfile.write(body)
+
+        elif path == "/api/digests":
+            # GET /api/digests?days=7&sev=all|high|medium&status=all|done|pending
+            if not FEATURE_SQLITE:
+                body = json.dumps({"articles":[],"stats":{}}).encode()
+            else:
+                qs     = parse_qs(self.path.split("?",1)[1]) if "?" in self.path else {}
+                days   = int(qs.get("days",  ["7"])[0])
+                sev    = qs.get("sev",    ["all"])[0]
+                status = qs.get("status", ["all"])[0]
+                cutoff = datetime.fromtimestamp(
+                    datetime.now(timezone.utc).timestamp() - days * 86400,
+                    tz=timezone.utc
+                ).isoformat()
+                with _db_lock:
+                    c = _db_conn()
+                    where  = ["first_seen >= ?"];  args = [cutoff]
+                    if sev    != "all": where.append("severity=?");      args.append(sev)
+                    if status != "all": where.append("digest_status=?"); args.append(status)
+                    sql = ("SELECT id,url,title,source,severity,panel,"
+                           "published_at,first_seen,digest,digest_status,digested_at "
+                           "FROM digested_articles WHERE " + " AND ".join(where) +
+                           " ORDER BY first_seen DESC LIMIT 300")
+                    rows   = [dict(r) for r in c.execute(sql, args).fetchall()]
+                    stats  = dict(c.execute("""
+                        SELECT digest_status, COUNT(*) as n
+                        FROM digested_articles WHERE first_seen >= ?
+                        GROUP BY digest_status
+                    """, [cutoff]).fetchall() or [])
+                    c.close()
+                body = json.dumps({"articles": rows, "stats": stats}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self._cors(); self.end_headers()
+            self.wfile.write(body)
+
+        elif path == "/api/latest-cycle":
+            # GET /api/latest-cycle — most recent completed LLM cycle from DB
+            row = None
+            if FEATURE_SQLITE:
+                try:
+                    with _db_lock:
+                        c = _db_conn()
+                        row = c.execute(
+                            "SELECT full_json, fetched_at, threat_level FROM cycles ORDER BY id DESC LIMIT 1"
+                        ).fetchone()
+                        c.close()
+                except Exception:
+                    pass
+            if row:
+                try:
+                    payload = json.loads(row["full_json"])
+                    payload["_fetched_at"] = row["fetched_at"]
+                    payload["_threat_level"] = row["threat_level"]
+                    body = json.dumps(payload).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self._cors(); self.end_headers()
+                    self.wfile.write(body)
+                except Exception:
+                    self.send_response(204); self._cors(); self.end_headers()
+            else:
+                self.send_response(204); self._cors(); self.end_headers()
+
+        elif path == "/api/wire":
+            # GET /api/wire — ANI + PTI West Bengal wire feed (cached 10 min)
+            try:
+                items = _fetch_wire()
+            except Exception as e:
+                print(f"  [wire] ERROR in _fetch_wire: {e}")
+                items = []
+            body = json.dumps({"items": items, "count": len(items)}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self._cors(); self.end_headers()
+            self.wfile.write(body)
+
+        elif path == "/api/figures-news":
+            # GET /api/figures-news — per-candidate Google News (cached 15 min)
+            try:
+                data = _fetch_figures_news()
+            except Exception as e:
+                print(f"  [figures-news] ERROR: {e}")
+                data = {}
+            body = json.dumps({"figures": data, "count": len(data)}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self._cors(); self.end_headers()
+            self.wfile.write(body)
+
+        elif path.startswith("/geojson/"):
+            # GET /geojson/<filename> — serve static GeoJSON files
+            fname = path[len("/geojson/"):]
+            # Safety: only allow simple filenames, no path traversal
+            if "/" in fname or ".." in fname:
+                self.send_error(400); return
+            geo_path = SCRIPT_DIR / "geojson" / fname
+            if geo_path.exists() and geo_path.suffix == ".geojson":
+                content = geo_path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/geo+json")
+                self._cors(); self.end_headers()
+                self.wfile.write(content)
+            else:
+                self.send_error(404)
+
+        elif path == "/api/turnout":
+            # GET /api/turnout — latest voter turnout per district
+            try:
+                data = fetch_turnout_data()
+            except Exception as e:
+                print(f"  [turnout] fetch error: {e}")
+                data = {}
+            # Also return history for trend chart (last 20 snapshots for Bankura)
+            history = []
+            if FEATURE_SQLITE:
+                try:
+                    with _db_lock:
+                        c = _db_conn()
+                        rows = c.execute("""
+                            SELECT recorded_at, district, turnout_pct
+                            FROM turnout_snapshots
+                            WHERE district='Bankura'
+                            ORDER BY recorded_at DESC LIMIT 20
+                        """).fetchall()
+                        c.close()
+                    history = [{"ts": r["recorded_at"], "pct": r["turnout_pct"]}
+                               for r in reversed(rows)]
+                except Exception:
+                    pass
+            body = json.dumps({
+                "districts": data,
+                "history":   history,
+                "districts_list": _TURNOUT_DISTRICTS,
+            }).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self._cors(); self.end_headers()
+            self.wfile.write(body)
+
+        elif path == "/api/briefing/config":
+            # GET /api/briefing/config — return current config (mask sensitive keys)
+            cfg = _load_briefing_config()
+            safe = dict(cfg)
+            if safe.get("telegram_bot_token"):
+                safe["telegram_bot_token"] = "***"   # never expose token to browser
+            if safe.get("sms_api_key"):
+                safe["sms_api_key"] = "***"
+            body = json.dumps(safe).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self._cors(); self.end_headers()
+            self.wfile.write(body)
+
+        elif path == "/api/briefing/send":
+            # GET /api/briefing/send — trigger briefing immediately
+            result = _send_briefing("manual")
+            body = json.dumps(result).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self._cors(); self.end_headers()
+            self.wfile.write(body)
+
+        elif path == "/api/telegram/chatid":
+            # GET /api/telegram/chatid?token=... — auto-detect chat_id from getUpdates
+            token = ""
+            if "?" in self.path:
+                token = parse_qs(self.path.split("?",1)[1]).get("token",[""])[0].strip()
+            if not token:
+                # fall back to saved token
+                token = _load_briefing_config().get("telegram_bot_token","").strip()
+            if not token:
+                self._reply(400, json.dumps({"error": "bot token required"}).encode())
+                return
+            try:
+                url = f"https://api.telegram.org/bot{token}/getUpdates"
+                req = urllib.request.Request(url, headers={"User-Agent": "WBIntelProxy/1"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = json.loads(resp.read())
+                if not data.get("ok"):
+                    self._reply(502, json.dumps({"error": data.get("description","Telegram error")}).encode())
+                    return
+                results = data.get("result", [])
+                if not results:
+                    self._reply(200, json.dumps({
+                        "chat_id": None,
+                        "hint": "No messages found — send /start to your bot first, then retry"
+                    }).encode())
+                    return
+                # Pick the most recent chat_id
+                msg = results[-1].get("message") or results[-1].get("channel_post") or {}
+                chat_id = str((msg.get("chat") or {}).get("id",""))
+                chat_title = (msg.get("chat") or {}).get("title") or (msg.get("from") or {}).get("first_name","")
+                self._reply(200, json.dumps({"chat_id": chat_id, "chat_title": chat_title}).encode())
+            except Exception as e:
+                self._reply(502, json.dumps({"error": str(e)[:200]}).encode())
+
+        elif path == "/api/briefing/history":
+            # GET /api/briefing/history?limit=20
+            limit = 20
+            if "?" in self.path:
+                qs = parse_qs(self.path.split("?",1)[1])
+                limit = int(qs.get("limit",["20"])[0])
+            rows = []
+            if FEATURE_SQLITE:
+                try:
+                    with _db_lock:
+                        c = _db_conn()
+                        rows = [dict(r) for r in c.execute("""
+                            SELECT id, sent_at, trigger, threat_level, headline,
+                                   ntfy_status, sms_status, cycle_id
+                            FROM briefing_sends ORDER BY id DESC LIMIT ?
+                        """, (limit,)).fetchall()]
+                        c.close()
+                except Exception as e:
+                    print(f"  [briefing] history error: {e}")
+            body = json.dumps({"sends": rows}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self._cors(); self.end_headers()
+            self.wfile.write(body)
+
+        elif path == "/api/latest":
+            # Instant DB read — no LLM call.
+            # All prod/portal clients use this; central scheduler keeps the DB fresh.
+            row = None
+            if FEATURE_SQLITE:
+                try:
+                    with _db_lock:
+                        c = _db_conn()
+                        row = c.execute(
+                            "SELECT fetched_at, full_json FROM cycles ORDER BY id DESC LIMIT 1"
+                        ).fetchone()
+                        c.close()
+                except Exception as e:
+                    print(f"  [latest] DB error: {e}")
+            if not row:
+                self._reply(200, json.dumps({
+                    "ok": False, "error": "No cycles yet — server fetch pending"
+                }).encode())
+                return
+            try:
+                cycle      = json.loads(row["full_json"] or "{}")
+                fetched_at = row["fetched_at"]
+                try:
+                    last_dt = datetime.fromisoformat(fetched_at).astimezone(timezone.utc)
+                    age_s   = int((datetime.now(timezone.utc) - last_dt).total_seconds())
+                except Exception:
+                    age_s = 0
+                next_in = max(0, _CENTRAL_FETCH_INTERVAL - age_s)
+                self._reply(200, json.dumps({
+                    "ok":                    True,
+                    "cycle":                 cycle,
+                    "fetched_at":            fetched_at,
+                    "age_seconds":           age_s,
+                    "next_fetch_in_seconds": next_in,
+                }).encode())
+            except Exception as e:
+                self._reply(500, json.dumps({"ok": False, "error": str(e)}).encode())
+
+        elif path == "/api/cycles":
+            # GET /api/cycles?limit=N — return last N full analysis cycles from SQLite
+            # Used by timeline modal so it works across browsers / domains
+            limit = 50
+            try:
+                qs = parse_qs(self.path.split("?",1)[1]) if "?" in self.path else {}
+                limit = int(qs.get("limit",["50"])[0])
+            except Exception:
+                pass
+            rows = []
+            if FEATURE_SQLITE:
+                try:
+                    with _db_lock:
+                        c = _db_conn()
+                        rows = c.execute(
+                            "SELECT fetched_at, full_json FROM cycles ORDER BY id DESC LIMIT ?",
+                            (limit,)
+                        ).fetchall()
+                        c.close()
+                    rows = [{"ts": r["fetched_at"], "full_json": r["full_json"]} for r in rows]
+                except Exception as e:
+                    print(f"  [cycles] DB error: {e}")
+            self._reply(200, json.dumps({"cycles": rows}).encode())
+
+        elif path == "/api/trend":
+            # GET /api/trend?limit=N — lightweight trend points for the chart
+            # Returns {iso, ts, threatLevel, totalSignals, highAlerts, violenceReports}
+            # oldest-first so the chart renders left→right correctly
+            limit = 200
+            try:
+                qs = parse_qs(self.path.split("?",1)[1]) if "?" in self.path else {}
+                limit = int(qs.get("limit",["200"])[0])
+            except Exception:
+                pass
+            points = []
+            if FEATURE_SQLITE:
+                try:
+                    with _db_lock:
+                        c = _db_conn()
+                        rows = c.execute(
+                            "SELECT fetched_at, full_json FROM cycles ORDER BY id DESC LIMIT ?",
+                            (limit,)
+                        ).fetchall()
+                        c.close()
+                    for row in reversed(rows):   # oldest first
+                        try:
+                            m = json.loads(row["full_json"] or "{}").get("metrics", {})
+                            tl             = (m.get("threatLevel") or "LOW").upper()
+                            v_reports      = m.get("violenceReports") or 0
+                            high_alerts    = m.get("highAlerts")      or 0
+                            # Recalibrate historical CRITICAL points that were inflated by the
+                            # old article-count logic (pre-fix, before 2026-04-03T19:13 UTC).
+                            # Before the fix, violenceReports counted raw article occurrences,
+                            # so 9 Malda articles → viol=9-13 → false CRITICAL.
+                            # After the fix, violenceReports counts distinct (location,type) incidents.
+                            # Rule: any CRITICAL cycle stored before the cutoff → remap to HIGH.
+                            FIX_CUTOFF = "2026-04-03T19:13:00"
+                            iso_ts = row["fetched_at"] or ""
+                            pre_fix = iso_ts < FIX_CUTOFF if iso_ts else False
+                            if tl == "CRITICAL" and (pre_fix or (v_reports < 5 and high_alerts < 8)):
+                                tl = "HIGH"
+                            points.append({
+                                "iso":             row["fetched_at"],
+                                "ts":              row["fetched_at"],
+                                "threatLevel":     tl,
+                                "totalSignals":    m.get("totalSignals") or 0,
+                                "highAlerts":      high_alerts,
+                                "violenceReports": v_reports,
+                            })
+                        except Exception:
+                            pass
+                except Exception as e:
+                    print(f"  [trend] DB error: {e}")
+            self._reply(200, json.dumps({"points": points}).encode())
+
+        elif path == "/api/digest/redigest":
+            # POST-like GET: /api/digest/redigest?id=N  — re-queue a failed/done article
+            if FEATURE_SQLITE and "?" in self.path:
+                aid = int(parse_qs(self.path.split("?",1)[1]).get("id",["0"])[0])
+                if aid:
+                    with _db_lock:
+                        c = _db_conn()
+                        c.execute("UPDATE digested_articles SET digest_status='pending' WHERE id=?", (aid,))
+                        c.commit(); c.close()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self._cors(); self.end_headers()
+            self.wfile.write(b'{"ok":true}')
+
         else:
             self.send_error(404)
 
@@ -1073,7 +3201,7 @@ class Handler(BaseHTTPRequestHandler):
         Chunked-transfer response with 10-second keepalive newlines.
 
         Solves Safari's ~90-second idle-TCP timeout on localhost:
-        while the LLM (especially large models like qwen3.5:9b) is thinking,
+        while the LLM is generating (qwen2.5:7b typically ~60-90s),
         this method sends a tiny whitespace chunk every 10 seconds so Safari
         sees data flowing and keeps the connection open.
 
@@ -1112,12 +3240,21 @@ class Handler(BaseHTTPRequestHandler):
                 send_chunk(b"\n")
 
             if error_box[0]:
-                raise error_box[0]
+                # Headers already sent — can't change status code.
+                # Send the error as a valid JSON body chunk so the browser
+                # receives a complete, parseable response.
+                err_msg = str(error_box[0])
+                print(f"  compute error (sending as JSON error body): {err_msg}")
+                err_body = json.dumps({
+                    "error": {"type": "compute_error", "message": err_msg}
+                }).encode()
+                send_chunk(err_body)
+            else:
+                # Send the real JSON body
+                body = json.dumps(result_box[0]).encode()
+                send_chunk(body)
 
-            # Send the real JSON body
-            body = json.dumps(result_box[0]).encode()
-            send_chunk(body)
-            # Chunked-encoding terminator
+            # Chunked-encoding terminator (always send — client needs this)
             self.wfile.write(b"0\r\n\r\n")
             self.wfile.flush()
 
@@ -1125,8 +3262,84 @@ class Handler(BaseHTTPRequestHandler):
             pass  # client disconnected — normal for browser timeout
 
     def do_POST(self):
+        if self.path == "/api/fetch/trigger":
+            # Localhost-only manual LLM trigger — dev use only.
+            # Runs _do_fetch_cycle() via _reply_chunked (keepalive during LLM wait).
+            # Response format matches /api/latest: {ok, cycle, fetched_at, age_seconds, next_fetch_in_seconds}
+            client_ip = self.client_address[0]
+            if client_ip not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+                self._reply(403, json.dumps({"ok": False, "error": "Localhost only"}).encode())
+                return
+            def _trigger_compute():
+                # Block until any in-progress central fetch finishes (keepalive chunks
+                # keep the browser connection alive during the wait).
+                # Timeout: 11 min (covers worst-case slow LLM + a full central cycle).
+                acquired = _fetch_lock.acquire(blocking=True, timeout=660)
+                if not acquired:
+                    raise TimeoutError("Could not start fetch — still locked after 11 min")
+                try:
+                    result     = _do_fetch_cycle()
+                    fetched_at = datetime.now(timezone.utc).isoformat()
+                    return {
+                        "ok":                    True,
+                        "cycle":                 result,
+                        "fetched_at":            fetched_at,
+                        "age_seconds":           0,
+                        "next_fetch_in_seconds": _CENTRAL_FETCH_INTERVAL,
+                    }
+                finally:
+                    _fetch_lock.release()
+            self._reply_chunked(_trigger_compute)
+            return
+
+        if self.path == "/api/briefing/config":
+            # POST /api/briefing/config — save config {enabled, telegram_bot_token, ...}
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body   = json.loads(self.rfile.read(length))
+                allowed = set(_BRIEFING_DEFAULTS.keys())
+                updates = {k: v for k, v in body.items() if k in allowed}
+                _save_briefing_config(updates)
+                self._reply(200, json.dumps({"ok": True}).encode())
+            except Exception as e:
+                self._reply(500, json.dumps({"error": str(e)}).encode())
+            return
+
+        if self.path == "/api/turnout":
+            # POST /api/turnout — manual entry: {district, pct, booths_total?, booths_reported?}
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body   = json.loads(self.rfile.read(length))
+                district = body.get("district", "").strip()
+                pct      = float(body.get("pct", 0))
+                if district not in _TURNOUT_DISTRICTS:
+                    self._reply(400, json.dumps({"error": "unknown district"}).encode())
+                    return
+                if not (0 <= pct <= 100):
+                    self._reply(400, json.dumps({"error": "pct out of range"}).encode())
+                    return
+                updated = _save_manual_turnout(
+                    district, pct,
+                    body.get("booths_total"),
+                    body.get("booths_reported"),
+                )
+                self._reply(200, json.dumps({"ok": True, "districts": updated}).encode())
+            except Exception as e:
+                self._reply(500, json.dumps({"error": str(e)}).encode())
+            return
+
         if self.path != "/v1/messages":
             self.send_error(404)
+            return
+
+        # Gate /v1/messages to localhost only — remote clients must use /api/latest
+        client_ip = self.client_address[0]
+        if client_ip not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+            self._reply(403, json.dumps({"error": {
+                "type":    "forbidden",
+                "message": "Direct LLM calls are disabled for remote access. "
+                           "Analysis is served centrally — use /api/latest."
+            }}).encode())
             return
 
         try:
@@ -1157,6 +3370,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Unknown backend: " + b)
             if pre_built:
                 result = merge_prebuilt_with_analysis(result, pre_built)
+            # Persist completed cycle to DB for briefing + history
+            _save_cycle(result)
             return result
 
         try:
@@ -1234,36 +3449,9 @@ def main():
     default_url, default_model = defaults.get(args.backend, ("", ""))
     backend_url = args.url   or default_url
 
-    # If no model specified and backend is ollama, offer interactive selection
-    if not args.model and args.backend == "ollama":
-        try:
-            chk = urllib.request.urlopen(
-                default_url.rstrip("/") + "/api/tags", timeout=4
-            )
-            tags_data = json.loads(chk.read())
-            installed = [m["name"] for m in tags_data.get("models", [])]
-        except Exception:
-            installed = []
-
-        if installed:
-            print("  Installed Ollama models:")
-            for i, name in enumerate(installed, 1):
-                print(f"    {i}) {name}")
-            print()
-            try:
-                raw = input(f"  Select model [1-{len(installed)}, default 1]: ").strip()
-            except (EOFError, KeyboardInterrupt):
-                raw = "1"
-            if raw.isdigit() and 1 <= int(raw) <= len(installed):
-                model = installed[int(raw) - 1]
-            elif raw and not raw.isdigit():
-                model = raw          # typed a model name directly
-            else:
-                model = installed[0] if installed else default_model
-        else:
-            model = default_model
-    else:
-        model = args.model or default_model
+    # Model: always qwen2.5:7b for ollama — hardcoded, no interactive selection.
+    # qwen3.5:9b and other large models cause VRAM contention and slow fetches.
+    model = default_model   # qwen2.5:7b (from defaults dict above)
     api_key     = args.key   or os.environ.get("GROQ_API_KEY","") or \
                                os.environ.get("GEMINI_API_KEY","") or \
                                os.environ.get("OPENAI_API_KEY","")
@@ -1278,22 +3466,7 @@ def main():
     print("\n  ╔══════════════════════════════════════════════════════════╗")
     print("  ║   WB ELECTION INTEL — Local LLM Proxy                   ║")
     print("  ╚══════════════════════════════════════════════════════════╝\n")
-    # Show available local models if Ollama
-    if args.backend == "ollama":
-        import subprocess
-        try:
-            result = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                lines = [l.strip() for l in result.stdout.strip().splitlines() if l.strip() and not l.startswith("NAME")]
-                if lines:
-                    print("  Installed models:")
-                    for l in lines:
-                        name = l.split()[0]
-                        marker = " <-- selected" if name.startswith(model.split(":")[0]) else ""
-                        print(f"    {name}{marker}")
-                    print()
-        except Exception:
-            pass
+    print(f"  Model: {model} (hardcoded — qwen2.5:7b only)")
     # ── Ollama connectivity check ──────────────────────────────────────
     if args.backend == "ollama":
         print("  Checking Ollama connection...")
@@ -1332,7 +3505,109 @@ def main():
     print(f"\n  News source: Live RSS feeds (Google News, no API key needed)")
     print(f"\n  Press Ctrl+C to stop\n")
 
-    server = QuietHTTPServer(("127.0.0.1", port), Handler)
+    # ── Phase 2: init SQLite DB and start background digest worker ───────────
+    _db_init()
+    _start_digest_worker(ollama_base=f"http://localhost:11434", model=model)
+
+    # ── Telegram: load config file, auto-detect chat_id if needed ────────────
+    _startup_telegram_check()
+
+    # ── Phase 4B: start daily briefing scheduler ──────────────────────────────
+    _start_briefing_scheduler()
+
+    # ── Central fetch scheduler ───────────────────────────────────────────────
+    # Fires LLM once every 15 min and stores result in DB.
+    # All prod/portal clients read from DB via /api/latest — no per-user LLM calls.
+    # Dev manual "Fetch & Analyse Now" uses /api/fetch/trigger (localhost-only).
+    def _central_fetch_loop():
+        import time as _t
+        # Decide initial delay based on age of last cycle in DB
+        delay = _CENTRAL_FETCH_INTERVAL
+        if FEATURE_SQLITE:
+            try:
+                with _db_lock:
+                    c = _db_conn()
+                    row = c.execute(
+                        "SELECT fetched_at FROM cycles ORDER BY id DESC LIMIT 1"
+                    ).fetchone()
+                    c.close()
+                if row:
+                    last_dt = datetime.fromisoformat(row["fetched_at"]).astimezone(timezone.utc)
+                    age     = (datetime.now(timezone.utc) - last_dt).total_seconds()
+                    delay   = max(30, _CENTRAL_FETCH_INTERVAL - age)
+                else:
+                    delay = 60   # no data at all — fetch soon after startup
+            except Exception:
+                delay = 60
+        print(f"  [central-fetch] Scheduler started — first fetch in {int(delay)}s")
+        _t.sleep(delay)
+        while True:
+            if not _fetch_lock.acquire(blocking=False):
+                print("  [central-fetch] Skipping tick — manual fetch in progress")
+                _t.sleep(60)
+                continue
+            try:
+                print("  [central-fetch] Starting scheduled fetch...")
+                _do_fetch_cycle()
+                print(f"  [central-fetch] Done — next in {_CENTRAL_FETCH_INTERVAL//60} min")
+            except Exception as e:
+                print(f"  [central-fetch] Error: {e}")
+            finally:
+                _fetch_lock.release()
+            _t.sleep(_CENTRAL_FETCH_INTERVAL)
+    threading.Thread(target=_central_fetch_loop, daemon=True, name="central-fetch").start()
+
+    # Pre-warm wire cache AND keep it warm with a background refresh thread.
+    # Wire cache TTL is 10 min; we refresh every 9 min so page loads always
+    # get an instant cached response instead of waiting 15-30s for a cold fetch.
+    def _wire_refresh_loop():
+        import time as _t
+        # Initial prewarm on startup
+        try:
+            _fetch_wire()
+            print("  [wire] Cache pre-warmed")
+        except Exception as e:
+            print(f"  [wire] Pre-warm failed: {e}")
+        # Then keep refreshing every 9 min (ahead of the 10-min TTL)
+        while True:
+            _t.sleep(9 * 60)
+            try:
+                global _wire_cache
+                _wire_cache["ts"] = 0.0   # force expiry so _fetch_wire re-fetches
+                _fetch_wire()
+                print("  [wire] Background cache refreshed")
+            except Exception as e:
+                print(f"  [wire] Background refresh failed: {e}")
+    threading.Thread(target=_wire_refresh_loop, daemon=True, name="wire-refresh").start()
+
+    # Phase 3B: pre-warm figures-news cache, then refresh every 14 min (TTL=15 min)
+    def _figures_refresh_loop():
+        import time as _t
+        try:
+            _fetch_figures_news()
+            print("  [figures-news] Cache pre-warmed")
+        except Exception as e:
+            print(f"  [figures-news] Pre-warm failed: {e}")
+        while True:
+            _t.sleep(14 * 60)
+            try:
+                global _FIGURES_NEWS_CACHE
+                _FIGURES_NEWS_CACHE["ts"] = 0.0
+                _fetch_figures_news()
+                print("  [figures-news] Background cache refreshed")
+            except Exception as e:
+                print(f"  [figures-news] Background refresh failed: {e}")
+    threading.Thread(target=_figures_refresh_loop, daemon=True, name="figures-refresh").start()
+
+
+    # Bind dual-stack (IPv4 + IPv6) so browsers that resolve localhost→::1 can connect
+    import socket as _socket
+    class _DualStackServer(QuietHTTPServer):
+        address_family = _socket.AF_INET6
+        def server_bind(self):
+            self.socket.setsockopt(_socket.IPPROTO_IPV6, _socket.IPV6_V6ONLY, 0)
+            super().server_bind()
+    server = _DualStackServer(("::", port), Handler)
 
     if not args.no_browser:
         threading.Timer(0.9, lambda: webbrowser.open(f"http://localhost:{port}")).start()
