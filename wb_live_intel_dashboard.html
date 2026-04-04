@@ -1031,7 +1031,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 
       <div class="feed-panel" id="feedSurrounds">
         <div class="feed-header">
-          <span class="feed-title">Surrounding districts</span>
+          <span class="feed-title">WB Statewide Context</span>
           <span class="feed-badge fb-local">REGIONAL</span>
         </div>
         <div class="feed-body" id="fbSurrounds"><div class="feed-loading">Awaiting fetch…</div></div>
@@ -1591,7 +1591,7 @@ function _renderParsed(parsed, ts){
   setTimeout(_matchWireHeight, 50);
 
   var statewideHtml = '';
-  statewideHtml += '<div class="section"><div class="sec-title">Surrounding districts</div><p>'+(an.surroundingSituation||'—')+'</p></div>';
+  statewideHtml += '<div class="section"><div class="sec-title">WB Statewide Context</div><p>'+(an.statewideContext||an.surroundingSituation||'—')+'</p></div>';
   if(an.partyPositions){
     statewideHtml += '<div class="section"><div class="sec-title">Party positions &amp; allegations</div><p style="color:var(--purple)">'+(an.partyPositions||'—')+'</p></div>';
   }
@@ -2158,7 +2158,7 @@ function applyParsedCycle(parsed, label){
   setTimeout(_matchWireHeight, 50);
 
   var statewideHtml = '';
-  statewideHtml += '<div class="section"><div class="sec-title">Surrounding districts</div><p>'+(an.surroundingSituation||'—')+'</p></div>';
+  statewideHtml += '<div class="section"><div class="sec-title">WB Statewide Context</div><p>'+(an.statewideContext||an.surroundingSituation||'—')+'</p></div>';
   if(an.partyPositions){
     statewideHtml += '<div class="section"><div class="sec-title">Party positions &amp; allegations</div><p style="color:var(--purple)">'+(an.partyPositions||'—')+'</p></div>';
   }
@@ -2584,7 +2584,7 @@ function exportCSV(){
     var an=c.analysis||{};
     rows.push([c.ts,c.metrics.threatLevel||'',c.metrics.totalSignals||0,c.metrics.highAlerts||0,c.metrics.violenceReports||0,
       (an.headline||'').replace(/,/g,';'),(an.bankuraSituation||'').replace(/,/g,';'),
-      (an.surroundingSituation||'').replace(/,/g,';'),(an.partyPositions||'').replace(/,/g,';'),
+      (an.statewideContext||an.surroundingSituation||'').replace(/,/g,';'),(an.partyPositions||'').replace(/,/g,';'),
       (an.keyRisks||[]).join(' | '),(an.observerActions||[]).join(' | '),
       (an.disinfoAlerts||'').replace(/,/g,';'),(an.overallAssessment||'').replace(/,/g,';')]);
   });
@@ -2658,7 +2658,7 @@ function generateVideoHTML(){
       '</div>'+
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'+
         '<div style="background:#0f172a;border-radius:6px;padding:10px;grid-column:1/-1"><div style="font-size:10px;color:#7c3aed;text-transform:uppercase;margin-bottom:4px">Party positions</div><div style="font-size:12px;color:#c4b5fd;line-height:1.5">'+(an.partyPositions||'No party data this cycle')+'</div></div>'+'<div style="background:#0f172a;border-radius:6px;padding:10px"><div style="font-size:10px;color:#475569;text-transform:uppercase;margin-bottom:4px">Bankura situation</div><div style="font-size:12px;color:#94a3b8;line-height:1.5">'+(an.bankuraSituation||'—')+'</div></div>'+
-        '<div style="background:#0f172a;border-radius:6px;padding:10px"><div style="font-size:10px;color:#475569;text-transform:uppercase;margin-bottom:4px">Surrounding districts</div><div style="font-size:12px;color:#94a3b8;line-height:1.5">'+(an.surroundingSituation||'—')+'</div></div>'+
+        '<div style="background:#0f172a;border-radius:6px;padding:10px"><div style="font-size:10px;color:#475569;text-transform:uppercase;margin-bottom:4px">WB Statewide Context</div><div style="font-size:12px;color:#94a3b8;line-height:1.5">'+(an.statewideContext||an.surroundingSituation||'—')+'</div></div>'+
         '<div style="background:#0f172a;border-radius:6px;padding:10px"><div style="font-size:10px;color:#475569;text-transform:uppercase;margin-bottom:4px">Key risks</div>'+risks+'</div>'+
         '<div style="background:#0f172a;border-radius:6px;padding:10px"><div style="font-size:10px;color:#475569;text-transform:uppercase;margin-bottom:4px">Observer actions</div>'+acts+'</div>'+
       '</div>'+feedsHtml+'</div>';

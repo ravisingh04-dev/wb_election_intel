@@ -1202,7 +1202,7 @@ def merge_prebuilt_with_analysis(llm_result, pre_built):
 
     blank_analysis = {
         "headline": "Analysis unavailable — see raw feeds",
-        "bankuraSituation": "", "surroundingSituation": "",
+        "bankuraSituation": "", "statewideContext": "",
         "partyPositions": "",
         "keyRisks": ["", "", ""], "observerActions": ["", "", ""],
         "disinfoAlerts": "", "overallAssessment": "",
@@ -1702,12 +1702,26 @@ def inject_news_into_payload(payload_dict):
         f"You are an election intelligence analyst briefing an official observer in Bankura district, "
         f"West Bengal. Phase 1 election date: 23 April 2026. Current time: {ts}.\n"
         f"You understand Bengali. Translate any Bengali headlines to English accurately.\n"
+        f"\n"
+        f"GEOGRAPHIC SEPARATION RULE — THIS IS MANDATORY:\n"
+        f"The news feed contains articles from TWO distinct geographic scopes:\n"
+        f"  (A) BANKURA DISTRICT and its immediate assembly constituencies — Saltora, Chhatna, "
+        f"Ranibandh, Raipur, Taldangra, Barjora, Onda, Sonamukhi, Kotulpur, Indas, Bishnupur.\n"
+        f"  (B) REST OF WEST BENGAL — Malda, Murshidabad, Birbhum, Kolkata, and other districts.\n"
+        f"You MUST NEVER attribute incidents, violence, or tensions from scope (B) to scope (A). "
+        f"If violence or clashes are reported in Malda, Murshidabad, or any non-Bankura district, "
+        f"they belong ONLY in statewideContext — NOT in bankuraSituation, NOT in keyRisks for Bankura, "
+        f"and NOT in the headline unless Bankura itself is explicitly named. "
+        f"If no violence or tension is specifically reported from Bankura district, bankuraSituation "
+        f"must reflect that calm — state 'No significant incidents reported from Bankura district' "
+        f"rather than importing statewide tensions.\n"
+        f"\n"
         f"CRITICAL INSTRUCTION: Respond with ONLY a raw JSON object. "
         f"Do NOT write any introduction, preamble, disclaimer, acknowledgement, or explanation. "
         f"Do NOT say 'Here is', 'As an analyst', 'I will', 'Based on', or anything similar. "
         f"Your ENTIRE response must be valid JSON starting with {{ and ending with }}. "
         f"Required format:\n"
-        f'{{"analysis":{{"headline":"","bankuraSituation":"","surroundingSituation":"",'
+        f'{{"analysis":{{"headline":"","bankuraSituation":"","statewideContext":"",'
         f'"partyPositions":"","keyRisks":["","",""],"observerActions":["","",""],'
         f'"disinfoAlerts":"","overallAssessment":""}},'
         f'"bangla_translations":["Pure English translation only — no Bengali script","Pure English only"]}}'
@@ -1716,14 +1730,21 @@ def inject_news_into_payload(payload_dict):
     user_prompt = (
         f"{brief}\n\n"
         f"Task 1 — ANALYSIS: Write a concise intelligence analysis for the observer.\n"
-        f"- headline: one sentence capturing the most important development\n"
-        f"- bankuraSituation: 2-3 sentences on Bankura district specifically\n"
-        f"- surroundingSituation: 2-3 sentences on surrounding districts\n"
-        f"- partyPositions: key party actions, statements, or incidents\n"
-        f"- keyRisks: exactly 3 specific risks the observer should watch for\n"
-        f"- observerActions: exactly 3 concrete recommended actions\n"
+        f"- headline: one sentence on the single most important development; "
+        f"only mention Bankura if Bankura itself has a notable event — otherwise lead with statewide context.\n"
+        f"- bankuraSituation: 2-3 sentences STRICTLY limited to Bankura district and its ACs. "
+        f"Use ONLY items from the [BANKURA DISTRICT] section. "
+        f"If no incidents are reported from Bankura, write 'No significant incidents reported from "
+        f"Bankura district. Routine pre-election activity observed.' Do NOT import Malda/WB tensions here.\n"
+        f"- statewideContext: 2-3 sentences on West Bengal statewide situation including "
+        f"surrounding districts (Malda, Murshidabad, Birbhum etc.) and statewide alerts. "
+        f"This is where Malda violence, Murshidabad clashes, and other non-Bankura incidents belong.\n"
+        f"- partyPositions: key party actions, statements, or incidents (cite district if known)\n"
+        f"- keyRisks: exactly 3 specific risks; clearly label each with the district/location it applies to. "
+        f"Do NOT list a Malda or Murshidabad risk as a Bankura risk.\n"
+        f"- observerActions: exactly 3 concrete recommended actions for the Bankura observer\n"
         f"- disinfoAlerts: any rumours, fake news, or coordinated narratives detected (or 'None detected')\n"
-        f"- overallAssessment: 2-3 sentence overall situation assessment\n\n"
+        f"- overallAssessment: 2-3 sentence summary distinguishing Bankura situation from WB statewide.\n\n"
         f"Task 2 — BENGALI SOURCES: Items 0,1,2... listed under [BENGALI SOURCES] above. "
         f"For EACH item write ONE English-only string: the meaning of the Bengali headline + 1-sentence context. "
         f"CRITICAL: Write ONLY English letters/words. Do NOT copy or reproduce any Bengali/Devanagari script. "
@@ -2022,7 +2043,7 @@ def _format_brief_telegram(parsed, trigger, ts):
         sections.append(f"<b>━━━ BANKURA SITUATION ━━━</b>\n{bankura_sit}")
 
     # Neighbouring districts (LLM)
-    surr_sit = (an.get("surroundingSituation") or "").strip()
+    surr_sit = (an.get("statewideContext") or an.get("surroundingSituation") or "").strip()
     if surr_sit:
         sections.append(f"<b>━━━ NEIGHBOURING DISTRICTS ━━━</b>\n{surr_sit}")
 
